@@ -1,0 +1,5 @@
+{
+  "name": "NeuroNutrition",
+  "description": "An AI-powered meal planner that uses your biometrics to generate optimized, clean-eating meal plans with precise macro tracking.",
+  "requestFramePermissions": []
+}
