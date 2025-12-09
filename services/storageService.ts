@@ -1,26 +1,77 @@
 import { UserData, UserProfile, MealPlan, Milestone } from '../types';
-
-const DATA_KEY_PREFIX = 'neuronutrition_data_';
+import { supabase } from './supabaseClient';
 
 export const storageService = {
-  saveUserData: (userId: string, profile: UserProfile, mealPlan: MealPlan, milestones: Milestone[] = []) => {
-    const data: UserData = { profile, mealPlan, milestones };
-    localStorage.setItem(`${DATA_KEY_PREFIX}${userId}`, JSON.stringify(data));
-  },
+  saveUserData: async (userId: string, profile: UserProfile, mealPlan: MealPlan, milestones: Milestone[] = []) => {
+    const { error } = await supabase
+      .from('user_data')
+      .upsert({
+        user_id: userId,
+        profile,
+        meal_plan: mealPlan,
+        milestones,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
 
-  getUserData: (userId: string): UserData | null => {
-    const data = localStorage.getItem(`${DATA_KEY_PREFIX}${userId}`);
-    if (!data) return null;
-
-    const parsed = JSON.parse(data);
-    // Ensure milestones array exists for backward compatibility
-    if (!parsed.milestones) {
-      parsed.milestones = [];
+    if (error) {
+      console.error('Error saving user data:', error);
+      throw error;
     }
-    return parsed;
   },
 
-  clearUserData: (userId: string) => {
-    localStorage.removeItem(`${DATA_KEY_PREFIX}${userId}`);
+  getUserData: async (userId: string): Promise<UserData | null> => {
+    const { data, error } = await supabase
+      .from('user_data')
+      .select('profile, meal_plan, milestones')
+      .eq('user_id', userId)
+      .single();
+
+    if (data) {
+      return {
+        profile: data.profile,
+        mealPlan: data.meal_plan,
+        milestones: data.milestones || []
+      };
+    }
+
+    // Fallback/Migration: Check localStorage
+    const DATA_KEY_PREFIX = 'neuronutrition_data_';
+    const localData = localStorage.getItem(`${DATA_KEY_PREFIX}${userId}`);
+    if (localData) {
+      try {
+        const parsed = JSON.parse(localData);
+        // Async migration
+        await supabase
+          .from('user_data')
+          .upsert({
+            user_id: userId,
+            profile: parsed.profile,
+            meal_plan: parsed.mealPlan,
+            milestones: parsed.milestones || [],
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+
+        return parsed;
+      } catch (e) {
+        console.error("Failed to migrate local data:", e);
+      }
+    }
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching user data:', error);
+    }
+
+    return null;
+  },
+
+  clearUserData: async (userId: string) => {
+    const { error } = await supabase
+      .from('user_data')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error clearing user data:', error);
+    }
   }
 };

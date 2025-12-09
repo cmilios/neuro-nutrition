@@ -19,9 +19,13 @@ const App: React.FC = () => {
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
+  // Track the currently loaded user ID to avoid stale closures in effects
+  const loadedUserIdRef = React.useRef<string | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
   const [rerollingState, setRerollingState] = useState<{ dayIndex: number, mealType: string } | null>(null);
 
   // Navigation State
@@ -35,10 +39,14 @@ const App: React.FC = () => {
   // Check for active session on boot & listen for changes
   useEffect(() => {
     // 1. Get initial session
-    authService.getSessionUser().then(currentUser => {
+    authService.getSessionUser().then(async (currentUser) => {
       if (currentUser) {
         setUser(currentUser);
-        loadUserData(currentUser.id);
+        // Avoid double loading if we already have it (unlikely in this flow but good practice)
+        if (loadedUserIdRef.current !== currentUser.id) {
+          loadedUserIdRef.current = currentUser.id;
+          await loadUserData(currentUser.id);
+        }
       }
     }).finally(() => {
       setIsAuthChecking(false);
@@ -53,12 +61,16 @@ const App: React.FC = () => {
           name: session.user.user_metadata.name || ''
         };
         setUser(currentUser);
-        // We only load data if we didn't have a user before to avoid re-fetching unnecessarily
-        // But for simplicity in this MVP, we can reload or rely on simple state
-        if (!user || user.id !== currentUser.id) {
-          loadUserData(currentUser.id);
+
+        // Use ref to check against the actual currently loaded user, avoiding stale closure issues
+        if (loadedUserIdRef.current !== currentUser.id) {
+          loadedUserIdRef.current = currentUser.id;
+          setIsDataLoading(true);
+          await loadUserData(currentUser.id);
+          setIsDataLoading(false);
         }
       } else {
+        loadedUserIdRef.current = null;
         setUser(null);
         setProfile(null);
         setMealPlan(null);
@@ -71,8 +83,8 @@ const App: React.FC = () => {
     };
   }, []);
 
-  const loadUserData = (userId: string) => {
-    const data = storageService.getUserData(userId);
+  const loadUserData = async (userId: string) => {
+    const data = await storageService.getUserData(userId);
     if (data) {
       setProfile(data.profile);
       setMealPlan(data.mealPlan);
@@ -80,13 +92,19 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAuthSuccess = (authenticatedUser: User) => {
+  const handleAuthSuccess = async (authenticatedUser: User) => {
     setUser(authenticatedUser);
-    loadUserData(authenticatedUser.id);
+    if (loadedUserIdRef.current !== authenticatedUser.id) {
+      loadedUserIdRef.current = authenticatedUser.id;
+      setIsDataLoading(true);
+      await loadUserData(authenticatedUser.id);
+      setIsDataLoading(false);
+    }
   };
 
   const handleLogout = async () => {
     await authService.logout();
+    loadedUserIdRef.current = null;
     setUser(null);
     setProfile(null);
     setMealPlan(null);
@@ -104,7 +122,7 @@ const App: React.FC = () => {
       const generatedPlan = await generateMealPlan(data);
       setMealPlan(generatedPlan);
       // Automatically save to "DB"
-      storageService.saveUserData(user.id, data, generatedPlan, milestones);
+      await storageService.saveUserData(user.id, data, generatedPlan, milestones);
     } catch (err) {
       setError("We encountered an issue generating your plan. Please check your API Key and try again.");
     } finally {
@@ -112,13 +130,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateProfile = (updatedProfile: UserProfile) => {
+  const handleUpdateProfile = async (updatedProfile: UserProfile) => {
     if (!user || !mealPlan) return;
     setProfile(updatedProfile);
-    storageService.saveUserData(user.id, updatedProfile, mealPlan, milestones);
+    await storageService.saveUserData(user.id, updatedProfile, mealPlan, milestones);
   };
 
-  const handleAddMilestone = (weight: number, note: string, bodyFat?: number) => {
+  const handleAddMilestone = async (weight: number, note: string, bodyFat?: number) => {
     if (!user || !profile || !mealPlan) return;
 
     const newMilestone: Milestone = {
@@ -136,14 +154,14 @@ const App: React.FC = () => {
     const updatedProfile = { ...profile, weightKg: weight };
     setProfile(updatedProfile);
 
-    storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
+    await storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
   };
 
-  const handleDeleteMilestone = (id: string) => {
+  const handleDeleteMilestone = async (id: string) => {
     if (!user || !profile || !mealPlan) return;
     const updatedMilestones = milestones.filter(m => m.id !== id);
     setMilestones(updatedMilestones);
-    storageService.saveUserData(user.id, profile, mealPlan, updatedMilestones);
+    await storageService.saveUserData(user.id, profile, mealPlan, updatedMilestones);
   }
 
   const handleRerollMeal = async (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => {
@@ -174,7 +192,7 @@ const App: React.FC = () => {
       const updatedPlan = { ...mealPlan, days: updatedDays };
 
       setMealPlan(updatedPlan);
-      storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+      await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
 
     } catch (err) {
       console.error(err);
@@ -184,7 +202,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleToggleIngredient = (dayIndex: number, mealType: string, ingredient: string) => {
+  const handleToggleIngredient = async (dayIndex: number, mealType: string, ingredient: string) => {
     if (!user || !profile || !mealPlan) return;
 
     const updatedDays = [...mealPlan.days];
@@ -204,16 +222,20 @@ const App: React.FC = () => {
 
     const updatedPlan = { ...mealPlan, days: updatedDays };
     setMealPlan(updatedPlan);
-    storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+    await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (!user) return;
     // Just clear local state, doesn't delete user account
     setProfile(null);
     setMealPlan(null);
     setMilestones([]);
-    storageService.clearUserData(user.id);
+    // Don't clear ref here because user is still logged in technically, 
+    // but semantically we are "resetting" their data. 
+    // Actually, we should probably keep the ref as is since the User ID hasn't changed.
+
+    await storageService.clearUserData(user.id);
     setError(null);
   };
 
@@ -238,7 +260,7 @@ const App: React.FC = () => {
       // Pass feedback to the generator
       const generatedPlan = await generateMealPlan(profile, feedback);
       setMealPlan(generatedPlan);
-      storageService.saveUserData(user.id, profile, generatedPlan, milestones);
+      await storageService.saveUserData(user.id, profile, generatedPlan, milestones);
     } catch (err) {
       setError("Failed to generate optimized plan. Please try again.");
     } finally {
@@ -246,7 +268,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (isAuthChecking) {
+  if (isAuthChecking || isDataLoading) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
   }
 
