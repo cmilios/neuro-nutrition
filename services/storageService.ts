@@ -11,7 +11,7 @@ export const storageService = {
   getUserData: (userId: string): UserData | null => {
     const data = localStorage.getItem(`${DATA_KEY_PREFIX}${userId}`);
     if (!data) return null;
-    
+
     const parsed = JSON.parse(data);
     // Ensure milestones array exists for backward compatibility
     if (!parsed.milestones) {

@@ -1,56 +1,80 @@
 import { User } from '../types';
-
-const USERS_KEY = 'neuronutrition_users';
-const SESSION_KEY = 'neuronutrition_session';
-
-// Helper to simulate network delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+import { supabase } from './supabaseClient';
 
 export const authService = {
   login: async (email: string, password: string): Promise<User> => {
-    await delay(800); // Simulate API call
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    const user = users.find((u: any) => u.email === email && u.password === password);
-    
-    if (!user) {
-      throw new Error('Invalid email or password');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      throw error;
     }
 
-    const sessionUser = { id: user.id, email: user.email, name: user.name };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    return sessionUser;
+    if (!data.user) {
+      throw new Error("No user returned from login");
+    }
+
+    return {
+      id: data.user.id,
+      email: data.user.email || '',
+      name: data.user.user_metadata.name || '',
+    };
   },
 
   register: async (email: string, password: string, name: string): Promise<User> => {
-    await delay(800); // Simulate API call
-    const users = JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
-    
-    if (users.find((u: any) => u.email === email)) {
-      throw new Error('User already exists');
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+        },
+      },
+    });
+
+    if (error) {
+      throw error;
     }
 
-    const newUser = {
-      id: crypto.randomUUID(),
-      email,
-      password, // Note: In a real app, never store plain text passwords!
-      name
-    };
+    if (!data.user) {
+      throw new Error("Registration succeeded but no user returned");
+    }
 
-    users.push(newUser);
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-    
-    const sessionUser = { id: newUser.id, email: newUser.email, name: newUser.name };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionUser));
-    return sessionUser;
+    // Note: If email confirmation is enabled, the user might not be able to login immediately
+    // or the session might be null.
+    // For this implementation, we assume auto-confirmation or we return the user regardless.
+    return {
+      id: data.user.id,
+      email: data.user.email || '',
+      name: name,
+    };
   },
 
   logout: async () => {
-    await delay(200);
-    localStorage.removeItem(SESSION_KEY);
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
   },
 
+  // This is kept for compatibility but synchronous checks are less reliable with async auth.
+  // We will primarily use the onAuthStateChange listener in App.tsx.
   getCurrentUser: (): User | null => {
-    const session = localStorage.getItem(SESSION_KEY);
-    return session ? JSON.parse(session) : null;
+    // Cannot sync get current user reliably with standard supabase client in one go without async
+    // We will return null here and rely on App.tsx to fetch session on load.
+    return null;
+  },
+
+  // Helper to get session async
+  getSessionUser: async (): Promise<User | null> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      return {
+        id: session.user.id,
+        email: session.user.email || '',
+        name: session.user.user_metadata.name || '',
+      };
+    }
+    return null;
   }
 };

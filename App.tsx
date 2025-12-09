@@ -11,18 +11,19 @@ import { UserProfile, MealPlan, User, DayPlan, Meal, MealFeedback, Milestone } f
 import { generateMealPlan, regenerateSingleMeal } from './services/geminiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
+import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [rerollingState, setRerollingState] = useState<{ dayIndex: number, mealType: string } | null>(null);
-  
+
   // Navigation State
   const [currentView, setCurrentView] = useState<'plan' | 'performance'>('plan');
 
@@ -31,13 +32,43 @@ const App: React.FC = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Check for active session on boot
+  // Check for active session on boot & listen for changes
   useEffect(() => {
-    const currentUser = authService.getCurrentUser();
-    if (currentUser) {
-      setUser(currentUser);
-      loadUserData(currentUser.id);
-    }
-    setIsAuthChecking(false);
+    // 1. Get initial session
+    authService.getSessionUser().then(currentUser => {
+      if (currentUser) {
+        setUser(currentUser);
+        loadUserData(currentUser.id);
+      }
+    }).finally(() => {
+      setIsAuthChecking(false);
+    });
+
+    // 2. Listen for auth changes (login, logout, token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const currentUser: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata.name || ''
+        };
+        setUser(currentUser);
+        // We only load data if we didn't have a user before to avoid re-fetching unnecessarily
+        // But for simplicity in this MVP, we can reload or rely on simple state
+        if (!user || user.id !== currentUser.id) {
+          loadUserData(currentUser.id);
+        }
+      } else {
+        setUser(null);
+        setProfile(null);
+        setMealPlan(null);
+        setMilestones([]);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const loadUserData = (userId: string) => {
@@ -68,7 +99,7 @@ const App: React.FC = () => {
     setProfile(data);
     setIsLoading(true);
     setError(null);
-    
+
     try {
       const generatedPlan = await generateMealPlan(data);
       setMealPlan(generatedPlan);
@@ -89,7 +120,7 @@ const App: React.FC = () => {
 
   const handleAddMilestone = (weight: number, note: string, bodyFat?: number) => {
     if (!user || !profile || !mealPlan) return;
-    
+
     const newMilestone: Milestone = {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
@@ -97,14 +128,14 @@ const App: React.FC = () => {
       note,
       bodyFatPercentage: bodyFat
     };
-    
+
     const updatedMilestones = [...milestones, newMilestone];
     setMilestones(updatedMilestones);
-    
+
     // Auto-update current weight in profile
     const updatedProfile = { ...profile, weightKg: weight };
     setProfile(updatedProfile);
-    
+
     storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
   };
 
@@ -122,16 +153,16 @@ const App: React.FC = () => {
 
     try {
       const newMeal = await regenerateSingleMeal(profile, mealType);
-      
+
       const updatedDays = [...mealPlan.days];
       const targetDay = { ...updatedDays[dayIndex] };
-      
+
       // Update specific meal
       targetDay[mealType] = newMeal;
 
       // Recalculate daily summary
       const meals = [targetDay.breakfast, targetDay.lunch, targetDay.dinner, targetDay.snack];
-      
+
       targetDay.dailySummary = meals.reduce((acc, meal) => ({
         calories: acc.calories + meal.macros.calories,
         protein: acc.protein + meal.macros.protein,
@@ -158,17 +189,17 @@ const App: React.FC = () => {
 
     const updatedDays = [...mealPlan.days];
     const targetDay = { ...updatedDays[dayIndex] };
-    
+
     // Using type assertion to access dynamic property safely in this controlled context
     const meal = targetDay[mealType as keyof DayPlan] as Meal;
-    
+
     if (meal && typeof meal === 'object') {
-       const currentChecked = meal.checkedIngredients || [];
-       if (currentChecked.includes(ingredient)) {
-         meal.checkedIngredients = currentChecked.filter(i => i !== ingredient);
-       } else {
-         meal.checkedIngredients = [...currentChecked, ingredient];
-       }
+      const currentChecked = meal.checkedIngredients || [];
+      if (currentChecked.includes(ingredient)) {
+        meal.checkedIngredients = currentChecked.filter(i => i !== ingredient);
+      } else {
+        meal.checkedIngredients = [...currentChecked, ingredient];
+      }
     }
 
     const updatedPlan = { ...mealPlan, days: updatedDays };
@@ -198,7 +229,7 @@ const App: React.FC = () => {
   // Called when the Review Modal is submitted
   const handleReviewSubmit = async (feedback: MealFeedback[]) => {
     if (!user || !profile) return;
-    
+
     setIsReviewModalOpen(false);
     setIsLoading(true);
     setError(null);
@@ -224,26 +255,26 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout 
-      user={user} 
+    <Layout
+      user={user}
       userProfile={profile}
       onOpenProfile={() => setIsProfileModalOpen(true)}
       onNextWeek={handleNextWeekRequest}
-      onLogout={handleLogout} 
+      onLogout={handleLogout}
       hasProfile={!!profile}
       currentView={currentView}
       onViewChange={setCurrentView}
     >
       <div className="animate-fade-in">
         <div className="mb-6 flex items-center justify-between">
-           <h2 className="text-xl font-bold text-slate-800">Welcome back, {user.name}</h2>
+          <h2 className="text-xl font-bold text-slate-800">Welcome back, {user.name}</h2>
         </div>
 
         {error && (
-           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center justify-between">
-              <span>{error}</span>
-              <button onClick={() => setError(null)} className="text-sm font-bold underline">Dismiss</button>
-           </div>
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-sm font-bold underline">Dismiss</button>
+          </div>
         )}
 
         {!profile && !isLoading && (
@@ -257,14 +288,14 @@ const App: React.FC = () => {
         {!isLoading && profile && (
           <>
             {currentView === 'plan' && mealPlan ? (
-              <PlanDashboard 
-                plan={mealPlan} 
+              <PlanDashboard
+                plan={mealPlan}
                 onReroll={handleRerollMeal}
                 rerollingState={rerollingState}
                 onToggleIngredient={handleToggleIngredient}
               />
             ) : currentView === 'performance' ? (
-              <PerformanceDashboard 
+              <PerformanceDashboard
                 milestones={milestones}
                 userProfile={profile}
               />
@@ -273,7 +304,7 @@ const App: React.FC = () => {
         )}
 
         {mealPlan && (
-          <WeeklyReviewModal 
+          <WeeklyReviewModal
             currentPlan={mealPlan}
             isOpen={isReviewModalOpen}
             onClose={() => setIsReviewModalOpen(false)}
@@ -282,7 +313,7 @@ const App: React.FC = () => {
         )}
 
         {profile && (
-          <UserProfileModal 
+          <UserProfileModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}

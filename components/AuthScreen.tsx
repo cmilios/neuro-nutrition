@@ -11,7 +11,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -33,6 +33,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       }
       onSuccess(user);
     } catch (err: any) {
+      console.error(err);
       setError(err.message || 'Authentication failed');
     } finally {
       setIsLoading(false);
@@ -55,18 +56,16 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
         <div className="flex gap-4 mb-8 border-b border-slate-100">
           <button
             onClick={() => { setIsLogin(true); setError(''); }}
-            className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${
-              isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
+            className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
+              }`}
           >
             Log In
             {isLogin && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-600 rounded-t-full" />}
           </button>
           <button
             onClick={() => { setIsLogin(false); setError(''); }}
-            className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${
-              !isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
-            }`}
+            className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${!isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
+              }`}
           >
             Create Account
             {!isLogin && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-600 rounded-t-full" />}
@@ -87,7 +86,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
                 <input
                   type="text"
                   value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  onChange={e => setFormData({ ...formData, name: e.target.value })}
                   className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                   placeholder="John Doe"
                 />
@@ -103,7 +102,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
                 type="email"
                 required
                 value={formData.email}
-                onChange={e => setFormData({...formData, email: e.target.value})}
+                onChange={e => setFormData({ ...formData, email: e.target.value })}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                 placeholder="you@example.com"
               />
@@ -118,7 +117,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
                 type="password"
                 required
                 value={formData.password}
-                onChange={e => setFormData({...formData, password: e.target.value})}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
                 className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none transition-all"
                 placeholder="••••••••"
               />
@@ -145,9 +144,9 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           </button>
         </form>
       </div>
-      
+
       <p className="mt-8 text-center text-xs text-slate-400">
-        Mock Identity Provider & SQL Store active.<br/>
+        Mock Identity Provider & SQL Store active.<br />
         Data persists to LocalStorage.
       </p>
     </div>
