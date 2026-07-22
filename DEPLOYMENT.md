@@ -2,11 +2,11 @@
 
 The app is a static React/Vite frontend (hosted on GitHub Pages) plus a Supabase
 backend: **Auth**, a **Postgres table** (`user_data`) for persistence, and an
-**Edge Function** (`generate-meal-plan`) that proxies the Claude API so the API
+**Edge Function** (`generate-meal-plan`) that proxies the OpenAI API so the API
 key is never exposed to the browser.
 
 ```
-Browser (GitHub Pages)  ──JWT──▶  Supabase Edge Function  ──ANTHROPIC_API_KEY──▶  Claude API
+Browser (GitHub Pages)  ──JWT──▶  Supabase Edge Function  ──OPENAI_API_KEY──▶  OpenAI API
         │                                    (key server-side only)
         └──anon key + JWT──▶  Supabase Auth + user_data table (RLS)
 ```
@@ -21,17 +21,17 @@ Already done:
 - ✅ `user_data` table + RLS policies applied
 - ✅ `generate-meal-plan` edge function deployed (verify_jwt = true)
 
-**Remaining manual step — set the Claude API key secret** (the MCP/dashboard, not
+**Remaining manual step — set the OpenAI API key secret** (the dashboard, not
 the repo). In the Supabase dashboard:
 **Project → Edge Functions → Secrets** (or Project Settings → Edge Functions),
 add:
-- `ANTHROPIC_API_KEY` = your Anthropic key (`sk-ant-...`)
-- *(optional)* `ANTHROPIC_MODEL` overrides the default `claude-sonnet-5`
+- `OPENAI_API_KEY` = your OpenAI Platform API key (`sk-...`)
+- *(optional)* `OPENAI_MODEL` overrides the default `gpt-5.6-sol`
 
 Or via CLI:
 ```bash
 supabase link --project-ref cmayisxvronrwvzhyuer
-supabase secrets set ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
+supabase secrets set OPENAI_API_KEY=sk-xxxxxxxx
 supabase functions deploy generate-meal-plan   # only needed to push code changes
 ```
 
@@ -63,12 +63,12 @@ npm run dev        # http://localhost:3000/neuro-nutrition/
 ```
 
 `.env.local` holds `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` only — these
-are safe for the client (the anon key is protected by RLS). The Claude key is
+are safe for the client (the anon key is protected by RLS). The OpenAI key is
 **not** here; local dev calls the *deployed* edge function, so meal generation
 works locally as long as the function is deployed and its secret is set.
 
 ### (Optional) run the edge function locally too
 ```bash
 supabase functions serve generate-meal-plan --env-file supabase/.env.local
-# supabase/.env.local should contain ANTHROPIC_API_KEY=... (this file is gitignored)
+# supabase/.env.local should contain OPENAI_API_KEY=... (this file is gitignored)
 ```

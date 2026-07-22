@@ -1,21 +1,21 @@
 // Supabase Edge Function: generate-meal-plan
 //
-// Server-side proxy to the Anthropic (Claude) Messages API. The Claude API key
-// lives ONLY here, as a Supabase secret (ANTHROPIC_API_KEY) — it is never shipped
+// Server-side proxy to the OpenAI Responses API. The OpenAI API key lives ONLY
+// here, as a Supabase secret (OPENAI_API_KEY) — it is never shipped
 // to the browser. The browser calls this function with the signed-in user's
 // Supabase JWT; the platform verifies that JWT (keep `verify_jwt` enabled), so
 // only authenticated users can generate plans.
 //
 // Deploy:  supabase functions deploy generate-meal-plan --project-ref <ref>
-// Secrets: supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  --project-ref <ref>
-//          (optional) supabase secrets set ANTHROPIC_MODEL=claude-sonnet-5
+// Secrets: supabase secrets set OPENAI_API_KEY=sk-...  --project-ref <ref>
+//          (optional) supabase secrets set OPENAI_MODEL=gpt-5.6-sol
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-// Sonnet is the default for this user-triggered structured-output workload. The
-// ANTHROPIC_MODEL secret can override it without a code deployment.
-const DEFAULT_MODEL = "claude-sonnet-5";
+const OPENAI_API_URL = "https://api.openai.com/v1/responses";
+// The current recommended GPT-5.6 coding/reasoning model is the default. The
+// OPENAI_MODEL secret can override it without a code deployment.
+const DEFAULT_MODEL = "gpt-5.6-sol";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -242,63 +242,78 @@ function buildMealPrompt(profile: Profile, mealType: string): string {
   `;
 }
 
-// ---- Anthropic call ---------------------------------------------------------
+// ---- OpenAI call ------------------------------------------------------------
 
-async function callClaude(
+async function callOpenAI(
   apiKey: string,
   model: string,
   prompt: string,
+  schemaName: string,
   schema: unknown,
   maxTokens: number,
 ): Promise<unknown> {
-  const res = await fetch(ANTHROPIC_API_URL, {
+  const res = await fetch(OPENAI_API_URL, {
     method: "POST",
     signal: AbortSignal.timeout(120_000),
     headers: {
       "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,
-      max_tokens: maxTokens,
-      // No temperature/top_p — rejected (400) on Opus 4.8 / Sonnet 5.
-      output_config: { format: { type: "json_schema", schema } },
-      messages: [{ role: "user", content: prompt }],
+      // Profiles contain health-related data; do not retain API responses.
+      store: false,
+      input: [{ role: "user", content: prompt }],
+      reasoning: { effort: "low" },
+      max_output_tokens: maxTokens,
+      text: {
+        format: {
+          type: "json_schema",
+          name: schemaName,
+          strict: true,
+          schema,
+        },
+      },
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
     let providerMessage = "";
-    let providerType = "";
+    let providerCode = "";
     let requestId = "";
 
     try {
       const body = JSON.parse(errText);
       providerMessage = body?.error?.message || "";
-      providerType = body?.error?.type || "";
-      requestId = body?.request_id || "";
+      providerCode = body?.error?.code || body?.error?.type || "";
+      requestId = res.headers.get("x-request-id") || "";
     } catch {
       // The provider occasionally returns a non-JSON gateway response.
     }
 
-    console.error("Anthropic request failed", {
+    console.error("OpenAI request failed", {
       status: res.status,
-      providerType,
+      providerCode,
       requestId,
     });
 
-    if (providerMessage.toLowerCase().includes("credit balance")) {
+    const normalizedMessage = providerMessage.toLowerCase();
+    if (
+      providerCode === "insufficient_quota" ||
+      normalizedMessage.includes("quota") ||
+      normalizedMessage.includes("billing") ||
+      normalizedMessage.includes("credit")
+    ) {
       throw new FunctionError(
-        "Meal generation is unavailable because the Anthropic API account has no remaining credits. Add credits in Anthropic Plans & Billing, then try again.",
+        "Meal generation is unavailable because the OpenAI API account has no remaining quota. Add API billing or credits in the OpenAI Platform, then try again.",
         402,
         "ai_credits_exhausted",
       );
     }
     if (res.status === 401 || res.status === 403) {
       throw new FunctionError(
-        "The AI provider credentials are invalid. Update the server-side Anthropic API key.",
+        "The AI provider credentials are invalid. Update the server-side OpenAI API key.",
         503,
         "ai_provider_auth_failed",
       );
@@ -320,21 +335,35 @@ async function callClaude(
 
   const data = await res.json();
 
-  if (data.stop_reason === "refusal") {
-    throw new FunctionError("The AI declined to generate this content.", 422, "ai_refusal");
-  }
-  if (data.stop_reason === "max_tokens") {
+  if (
+    data.status === "incomplete" &&
+    data.incomplete_details?.reason === "max_output_tokens"
+  ) {
     throw new FunctionError("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
   }
 
-  const textBlock = (data.content || []).find(
-    (b: { type: string }) => b.type === "text",
-  );
+  const contentBlocks = (data.output || [])
+    .filter((item: { type?: string }) => item.type === "message")
+    .flatMap((item: { content?: unknown[] }) => item.content || []);
+  const refusalBlock = contentBlocks.find(
+    (block: { type?: string }) => block.type === "refusal",
+  ) as { refusal?: string } | undefined;
+  if (refusalBlock) {
+    throw new FunctionError("The AI declined to generate this content.", 422, "ai_refusal");
+  }
+
+  const textBlock = contentBlocks.find(
+    (block: { type?: string }) => block.type === "output_text",
+  ) as { text?: string } | undefined;
   if (!textBlock?.text) {
     throw new FunctionError("No content returned from the AI.", 502, "ai_empty_response");
   }
 
-  return JSON.parse(textBlock.text);
+  try {
+    return JSON.parse(textBlock.text);
+  } catch {
+    throw new FunctionError("The AI returned an invalid structured response. Please retry.", 502, "ai_invalid_response");
+  }
 }
 
 // ---- HTTP handler -----------------------------------------------------------
@@ -357,15 +386,15 @@ Deno.serve(async (req: Request) => {
 
     await requireAuthenticatedUser(req);
 
-    const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
       throw new FunctionError(
-        "Meal generation is not configured. Add the server-side Anthropic API key.",
+        "Meal generation is not configured. Add the server-side OpenAI API key.",
         503,
         "ai_not_configured",
       );
     }
-    const model = Deno.env.get("ANTHROPIC_MODEL") || DEFAULT_MODEL;
+    const model = Deno.env.get("OPENAI_MODEL") || DEFAULT_MODEL;
 
     let requestBody: Record<string, unknown>;
     try {
@@ -389,10 +418,11 @@ Deno.serve(async (req: Request) => {
       if (typeof mealType !== "string" || !allowedMealTypes.has(mealType)) {
         throw new FunctionError("Invalid mealType.", 400, "invalid_meal_type");
       }
-      const meal = await callClaude(
+      const meal = await callOpenAI(
         apiKey,
         model,
         buildMealPrompt(profile, mealType),
+        "meal",
         mealSchema,
         4000,
       );
@@ -404,10 +434,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // Default: full 7-day plan
-    const plan = await callClaude(
+    const plan = await callOpenAI(
       apiKey,
       model,
       buildPlanPrompt(profile, feedback as Feedback[] | undefined),
+      "meal_plan",
       mealPlanSchema,
       16000,
     );

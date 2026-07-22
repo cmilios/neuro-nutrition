@@ -15,9 +15,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/1SJRjliEpFlLb4gzF7X53-C
 1. Install dependencies:
    `npm install`
 2. Ensure `.env.local` has `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-   (the Claude API key lives server-side in Supabase, not here).
+   (the OpenAI API key lives server-side in Supabase, not here).
 3. Run the app:
    `npm run dev`  → http://localhost:3000/neuro-nutrition/
 
-AI meal generation runs through a Supabase Edge Function that holds the Claude
+AI meal generation runs through a Supabase Edge Function that holds the OpenAI
 API key. See [DEPLOYMENT.md](DEPLOYMENT.md) for backend + hosting setup.

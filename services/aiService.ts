@@ -2,7 +2,7 @@ import { UserProfile, MealPlan, Meal, MealFeedback } from "../types";
 import { supabase } from "./supabaseClient";
 
 // All AI generation goes through the `generate-meal-plan` Supabase Edge Function,
-// which holds the Claude API key server-side. supabase-js automatically attaches
+// which holds the OpenAI API key server-side. supabase-js automatically attaches
 // the signed-in user's access token, so only authenticated users can call it.
 
 async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
