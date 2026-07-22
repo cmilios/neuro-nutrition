@@ -24,7 +24,12 @@ export const storageService = {
       .from('user_data')
       .select('profile, meal_plan, milestones')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching user data:', error);
+      throw error;
+    }
 
     if (data) {
       return {
@@ -42,9 +47,9 @@ export const storageService = {
       try {
         const parsed = JSON.parse(localData);
 
-        // Background migration (fire and forget - but log)
-        // We do NOT await this, so the UI unblocks immediately.
-        supabase
+        // Finish migration before returning. A fire-and-forget upsert can race
+        // with a subsequent save and overwrite a newly generated plan.
+        const { error: migrationError } = await supabase
           .from('user_data')
           .upsert({
             user_id: userId,
@@ -52,24 +57,18 @@ export const storageService = {
             meal_plan: parsed.mealPlan,
             milestones: parsed.milestones || [],
             updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' })
-          .then(({ error: migrationError }) => {
-            if (!migrationError) {
-              console.log('Background migration successful, clearing local storage.');
-              localStorage.removeItem(`${DATA_KEY_PREFIX}${userId}`);
-            } else {
-              console.error('Background migration failed:', migrationError);
-            }
-          });
+          }, { onConflict: 'user_id' });
+
+        if (migrationError) {
+          console.error('Local data migration failed:', migrationError);
+        } else {
+          localStorage.removeItem(`${DATA_KEY_PREFIX}${userId}`);
+        }
 
         return parsed;
       } catch (e) {
         console.error("Failed to parse local data for migration:", e);
       }
-    }
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching user data:', error);
     }
 
     return null;
@@ -83,6 +82,7 @@ export const storageService = {
 
     if (error) {
       console.error('Error clearing user data:', error);
+      throw error;
     }
   }
 };

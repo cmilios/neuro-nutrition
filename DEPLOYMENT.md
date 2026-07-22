@@ -26,8 +26,7 @@ the repo). In the Supabase dashboard:
 **Project → Edge Functions → Secrets** (or Project Settings → Edge Functions),
 add:
 - `ANTHROPIC_API_KEY` = your Anthropic key (`sk-ant-...`)
-- *(optional)* `ANTHROPIC_MODEL` = `claude-sonnet-5`  (cheaper/faster than the
-  default `claude-opus-4-8`)
+- *(optional)* `ANTHROPIC_MODEL` overrides the default `claude-sonnet-5`
 
 Or via CLI:
 ```bash

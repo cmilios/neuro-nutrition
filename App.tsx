@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import Layout from './components/Layout';
 import ProfileForm from './components/ProfileForm';
 import PlanDashboard from './components/PlanDashboard';
@@ -35,100 +36,119 @@ const App: React.FC = () => {
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  // Check for active session on boot
-  // Check for active session on boot & listen for changes
+  const userFromSession = (session: Session | null): User | null => {
+    if (!session?.user) return null;
+
+    return {
+      id: session.user.id,
+      email: session.user.email || '',
+      name: session.user.user_metadata?.name || '',
+    };
+  };
+
+  const errorMessage = (err: unknown, fallback: string) =>
+    err instanceof Error && err.message ? err.message : fallback;
+
+  // Keep auth callbacks synchronous. Calling another Supabase API from an async
+  // onAuthStateChange callback can deadlock supabase-js.
   useEffect(() => {
-    // Listen for auth changes (login, logout, token refresh, initial session)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('App: onAuthStateChange event:', event, 'Session user:', session?.user?.id);
+    let mounted = true;
 
-      if (session?.user) {
-        const currentUser: User = {
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata.name || ''
-        };
-        setUser(currentUser);
+    const applySession = (session: Session | null) => {
+      if (!mounted) return;
+      const nextUser = userFromSession(session);
+      setUser(nextUser);
 
-        // Use ref to check against the actual currently loaded user, avoiding stale closure issues
-        if (loadedUserIdRef.current !== currentUser.id) {
-          console.log('App: User changed/loading. Setting isDataLoading = true');
-          loadedUserIdRef.current = currentUser.id;
-
-          // Only show data loading spinner if we aren't already showing the full auth check spinner
-          // (This prevents a double spinner or flicker)
-          // Actually, since we await below, the isAuthChecking will act as the loader for the first run.
-          // We can use isDataLoading for subsequent switches.
-          // But to be safe and simple:
-          setIsDataLoading(true);
-
-          try {
-            await loadUserData(currentUser.id);
-          } catch (err) {
-            console.error("Failed to load user data on auth change:", err);
-            setError("Failed to load your data. Please refresh.");
-          } finally {
-            console.log('App: User data load finished (finally). Setting isDataLoading = false');
-            setIsDataLoading(false);
-          }
-        } else {
-          console.log('App: User already loaded. Skipping loadUserData.');
-        }
-      } else {
+      if (!nextUser) {
         loadedUserIdRef.current = null;
-        setUser(null);
         setProfile(null);
         setMealPlan(null);
         setMilestones([]);
       }
+    };
 
-      // Initial auth check is done once the first event is processed
-      console.log('App: onAuthStateChange processed. Setting isAuthChecking = false');
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySession(session);
       setIsAuthChecking(false);
     });
 
+    supabase.auth.getSession()
+      .then(({ data, error: sessionError }) => {
+        if (sessionError) throw sessionError;
+        applySession(data.session);
+      })
+      .catch((sessionError) => {
+        console.error('Failed to restore session:', sessionError);
+        if (mounted) setError('Could not restore your session. Please log in again.');
+      })
+      .finally(() => {
+        if (mounted) setIsAuthChecking(false);
+      });
+
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
-  const loadUserData = async (userId: string) => {
-    const data = await storageService.getUserData(userId);
-    if (data) {
-      setProfile(data.profile);
-      setMealPlan(data.mealPlan);
-      setMilestones(data.milestones || []);
-    }
-  };
+  // Data loading is deliberately separate from the auth callback to avoid the
+  // supabase-js auth callback deadlock and stale data leaking between users.
+  useEffect(() => {
+    if (!user || loadedUserIdRef.current === user.id) return;
 
-  const handleAuthSuccess = async (authenticatedUser: User) => {
-    setUser(authenticatedUser);
-    if (loadedUserIdRef.current !== authenticatedUser.id) {
-      loadedUserIdRef.current = authenticatedUser.id;
-      setIsDataLoading(true);
-      try {
-        await loadUserData(authenticatedUser.id);
-      } catch (err) {
-        console.error("Failed to load user data on login:", err);
-        setError("Failed to load your data. Please try again.");
-      } finally {
-        setIsDataLoading(false);
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    await authService.logout();
-    loadedUserIdRef.current = null;
-    setUser(null);
+    let cancelled = false;
+    loadedUserIdRef.current = user.id;
+    setIsDataLoading(true);
     setProfile(null);
     setMealPlan(null);
     setMilestones([]);
+
+    storageService.getUserData(user.id)
+      .then((data) => {
+        if (cancelled || loadedUserIdRef.current !== user.id) return;
+        setProfile(data?.profile ?? null);
+        setMealPlan(data?.mealPlan ?? null);
+        setMilestones(data?.milestones ?? []);
+      })
+      .catch((loadError) => {
+        console.error('Failed to load user data:', loadError);
+        if (!cancelled) {
+          loadedUserIdRef.current = null;
+          setError('Failed to load your data. Please refresh.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsDataLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const handleAuthSuccess = (authenticatedUser: User) => {
+    setUser(authenticatedUser);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authService.logout();
+      loadedUserIdRef.current = null;
+      setUser(null);
+      setProfile(null);
+      setMealPlan(null);
+      setMilestones([]);
+    } catch (logoutError) {
+      console.error('Failed to log out:', logoutError);
+      setError('Could not log out. Please try again.');
+    }
   };
 
   const handleProfileSubmit = async (data: UserProfile) => {
     if (!user) return;
 
+    // Keep the submitted values as a draft so a failed generation can be
+    // retried without forcing the user to re-enter the entire profile.
     setProfile(data);
     setIsLoading(true);
     setError(null);
@@ -136,10 +156,15 @@ const App: React.FC = () => {
     try {
       const generatedPlan = await generateMealPlan(data);
       setMealPlan(generatedPlan);
-      // Automatically save to "DB"
-      await storageService.saveUserData(user.id, data, generatedPlan, milestones);
+      try {
+        await storageService.saveUserData(user.id, data, generatedPlan, milestones);
+      } catch (saveError) {
+        console.error('Plan generated but failed to save:', saveError);
+        setError('Your plan was generated, but it could not be synced. Please try again before leaving this page.');
+      }
     } catch (err) {
-      setError("We encountered an issue generating your plan. Please check your API Key and try again.");
+      console.error('Failed to generate meal plan:', err);
+      setError(errorMessage(err, 'We encountered an issue generating your plan. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -147,8 +172,13 @@ const App: React.FC = () => {
 
   const handleUpdateProfile = async (updatedProfile: UserProfile) => {
     if (!user || !mealPlan) return;
-    setProfile(updatedProfile);
-    await storageService.saveUserData(user.id, updatedProfile, mealPlan, milestones);
+    try {
+      await storageService.saveUserData(user.id, updatedProfile, mealPlan, milestones);
+      setProfile(updatedProfile);
+    } catch (saveError) {
+      console.error('Failed to update profile:', saveError);
+      setError('Could not save your profile changes. Please try again.');
+    }
   };
 
   const handleAddMilestone = async (weight: number, note: string, bodyFat?: number) => {
@@ -163,20 +193,27 @@ const App: React.FC = () => {
     };
 
     const updatedMilestones = [...milestones, newMilestone];
-    setMilestones(updatedMilestones);
-
-    // Auto-update current weight in profile
     const updatedProfile = { ...profile, weightKg: weight };
-    setProfile(updatedProfile);
-
-    await storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
+    try {
+      await storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
+      setMilestones(updatedMilestones);
+      setProfile(updatedProfile);
+    } catch (saveError) {
+      console.error('Failed to add milestone:', saveError);
+      setError('Could not save that milestone. Please try again.');
+    }
   };
 
   const handleDeleteMilestone = async (id: string) => {
     if (!user || !profile || !mealPlan) return;
     const updatedMilestones = milestones.filter(m => m.id !== id);
-    setMilestones(updatedMilestones);
-    await storageService.saveUserData(user.id, profile, mealPlan, updatedMilestones);
+    try {
+      await storageService.saveUserData(user.id, profile, mealPlan, updatedMilestones);
+      setMilestones(updatedMilestones);
+    } catch (saveError) {
+      console.error('Failed to delete milestone:', saveError);
+      setError('Could not delete that milestone. Please try again.');
+    }
   }
 
   const handleRerollMeal = async (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => {
@@ -211,7 +248,7 @@ const App: React.FC = () => {
 
     } catch (err) {
       console.error(err);
-      setError("Failed to regenerate meal. Please try again.");
+      setError(errorMessage(err, 'Failed to regenerate the meal. Please try again.'));
     } finally {
       setRerollingState(null);
     }
@@ -223,35 +260,46 @@ const App: React.FC = () => {
     const updatedDays = [...mealPlan.days];
     const targetDay = { ...updatedDays[dayIndex] };
 
-    // Using type assertion to access dynamic property safely in this controlled context
     const meal = targetDay[mealType as keyof DayPlan] as Meal;
 
     if (meal && typeof meal === 'object') {
       const currentChecked = meal.checkedIngredients || [];
-      if (currentChecked.includes(ingredient)) {
-        meal.checkedIngredients = currentChecked.filter(i => i !== ingredient);
-      } else {
-        meal.checkedIngredients = [...currentChecked, ingredient];
-      }
+      const checkedIngredients = currentChecked.includes(ingredient)
+        ? currentChecked.filter(i => i !== ingredient)
+        : [...currentChecked, ingredient];
+
+      // Clone the meal instead of mutating the existing React state object.
+      targetDay[mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack'] = {
+        ...meal,
+        checkedIngredients,
+      };
     }
+
+    updatedDays[dayIndex] = targetDay;
 
     const updatedPlan = { ...mealPlan, days: updatedDays };
     setMealPlan(updatedPlan);
-    await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+    try {
+      await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+    } catch (saveError) {
+      console.error('Failed to save ingredient state:', saveError);
+      setMealPlan(mealPlan);
+      setError('Could not save that ingredient change. Please try again.');
+    }
   };
 
   const handleReset = async () => {
     if (!user) return;
-    // Just clear local state, doesn't delete user account
-    setProfile(null);
-    setMealPlan(null);
-    setMilestones([]);
-    // Don't clear ref here because user is still logged in technically, 
-    // but semantically we are "resetting" their data. 
-    // Actually, we should probably keep the ref as is since the User ID hasn't changed.
-
-    await storageService.clearUserData(user.id);
-    setError(null);
+    try {
+      await storageService.clearUserData(user.id);
+      setProfile(null);
+      setMealPlan(null);
+      setMilestones([]);
+      setError(null);
+    } catch (clearError) {
+      console.error('Failed to reset user data:', clearError);
+      setError('Could not reset your data. Please try again.');
+    }
   };
 
   // Triggered by the "Next Week" button in Layout
@@ -277,7 +325,8 @@ const App: React.FC = () => {
       setMealPlan(generatedPlan);
       await storageService.saveUserData(user.id, profile, generatedPlan, milestones);
     } catch (err) {
-      setError("Failed to generate optimized plan. Please try again.");
+      console.error('Failed to generate optimized plan:', err);
+      setError(errorMessage(err, 'Failed to generate an optimized plan. Please try again.'));
     } finally {
       setIsLoading(false);
     }
@@ -298,7 +347,7 @@ const App: React.FC = () => {
       onOpenProfile={() => setIsProfileModalOpen(true)}
       onNextWeek={handleNextWeekRequest}
       onLogout={handleLogout}
-      hasProfile={!!profile}
+      hasProfile={!!mealPlan}
       currentView={currentView}
       onViewChange={setCurrentView}
     >
@@ -314,8 +363,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {!profile && !isLoading && (
-          <ProfileForm onSubmit={handleProfileSubmit} isLoading={isLoading} />
+        {!mealPlan && !isLoading && (
+          <ProfileForm initialData={profile} onSubmit={handleProfileSubmit} isLoading={isLoading} />
         )}
 
         {isLoading && (
@@ -349,7 +398,7 @@ const App: React.FC = () => {
           />
         )}
 
-        {profile && (
+        {profile && mealPlan && (
           <UserProfileModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}

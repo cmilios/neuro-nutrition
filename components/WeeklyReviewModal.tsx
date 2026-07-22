@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MealPlan, MealFeedback } from '../types';
 import { ThumbsUp, Check, ArrowRight, X } from 'lucide-react';
 
@@ -16,6 +16,10 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
   onSubmit
 }) => {
   const [feedback, setFeedback] = useState<MealFeedback[]>([]);
+
+  useEffect(() => {
+    if (isOpen) setFeedback([]);
+  }, [isOpen]);
 
   // Initialize feedback state map if needed, or build it dynamically
   const getFeedback = (day: string, type: string, name: string) => {

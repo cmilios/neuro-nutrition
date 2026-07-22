@@ -17,15 +17,16 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
   onToggleIngredient,
   mealType 
 }) => {
-  if (!isOpen) return null;
-
   // Prevent background scrolling when modal is open
   React.useEffect(() => {
+    if (!isOpen) return;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, []);
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   const checkedIngredients = new Set(meal.checkedIngredients || []);
 

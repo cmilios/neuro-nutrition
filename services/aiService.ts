@@ -17,7 +17,11 @@ async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
       const ctx = (error as { context?: Response }).context;
       if (ctx && typeof ctx.json === "function") {
         const parsed = await ctx.json();
-        if (parsed?.error) message = parsed.error;
+        if (typeof parsed?.error === "string") {
+          message = parsed.error;
+        } else if (typeof parsed?.error?.message === "string") {
+          message = parsed.error.message;
+        }
       }
     } catch {
       // ignore — fall back to the generic message
@@ -35,7 +39,13 @@ export const generateMealPlan = async (
   profile: UserProfile,
   feedback?: MealFeedback[],
 ): Promise<MealPlan> => {
-  return invokeAI<MealPlan>({ action: "plan", profile, feedback });
+  const plan = await invokeAI<MealPlan>({ action: "plan", profile, feedback });
+
+  if (!Array.isArray(plan.days) || plan.days.length !== 7) {
+    throw new Error("The AI returned an incomplete weekly plan. Please try again.");
+  }
+
+  return plan;
 };
 
 export const regenerateSingleMeal = async (

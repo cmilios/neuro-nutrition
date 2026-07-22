@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MealPlan, DayPlan, Meal } from '../types';
 import { Flame, Droplet, Wheat, Dumbbell, Clock, ChefHat, RefreshCw } from 'lucide-react';
 import MealDetailsModal from './MealDetailsModal';
@@ -18,8 +18,20 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
 }) => {
   const [activeDayIndex, setActiveDayIndex] = useState(0);
   const [selectedMeal, setSelectedMeal] = useState<{ dayIndex: number, type: string, meal: Meal } | null>(null);
+
+  useEffect(() => {
+    if (activeDayIndex >= plan.days.length) setActiveDayIndex(0);
+  }, [activeDayIndex, plan.days.length]);
   
   const activeDay = plan.days[activeDayIndex];
+
+  if (!activeDay) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+        This saved plan is incomplete. Generate a new weekly plan to continue.
+      </div>
+    );
+  }
 
   const isRerolling = (type: string) => 
     rerollingState?.dayIndex === activeDayIndex && rerollingState?.mealType === type;

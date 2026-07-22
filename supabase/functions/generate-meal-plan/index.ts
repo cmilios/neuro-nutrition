@@ -13,10 +13,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-// Default per Anthropic guidance. For this workload (large structured meal plans,
-// user-triggered) `claude-sonnet-5` is ~5x cheaper and faster and works very well —
-// set the ANTHROPIC_MODEL secret to switch without a code change.
-const DEFAULT_MODEL = "claude-opus-4-8";
+// Sonnet is the default for this user-triggered structured-output workload. The
+// ANTHROPIC_MODEL secret can override it without a code deployment.
+const DEFAULT_MODEL = "claude-sonnet-5";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,6 +23,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+class FunctionError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
 
 // ---- JSON schemas (structured outputs) -------------------------------------
 // Every object needs additionalProperties:false and a full `required` list.
@@ -89,7 +98,11 @@ const mealPlanSchema = {
       type: "string",
       description: "A brief nutritional advice summary based on biometrics.",
     },
-    days: { type: "array", items: dayPlanSchema },
+    days: {
+      type: "array",
+      items: dayPlanSchema,
+      description: "Exactly seven entries, one for each day of the week.",
+    },
   },
   required: ["weeklySummary", "days"],
 };
@@ -112,6 +125,63 @@ interface Feedback {
   name: string;
   cooked: boolean;
   liked: boolean;
+}
+
+const allowedMealTypes = new Set(["breakfast", "lunch", "dinner", "snack"]);
+
+function assertValidProfile(value: unknown): asserts value is Profile {
+  if (!value || typeof value !== "object") {
+    throw new FunctionError("Missing profile.", 400, "invalid_profile");
+  }
+
+  const profile = value as Record<string, unknown>;
+  const numericRanges: Array<[string, number, number]> = [
+    ["age", 10, 120],
+    ["heightCm", 80, 250],
+    ["weightKg", 20, 500],
+  ];
+
+  for (const [field, min, max] of numericRanges) {
+    const number = profile[field];
+    if (typeof number !== "number" || !Number.isFinite(number) || number < min || number > max) {
+      throw new FunctionError(`Invalid ${field}.`, 400, "invalid_profile");
+    }
+  }
+
+  if (profile.targetWeightKg !== undefined) {
+    const target = profile.targetWeightKg;
+    if (typeof target !== "number" || !Number.isFinite(target) || target < 20 || target > 500) {
+      throw new FunctionError("Invalid targetWeightKg.", 400, "invalid_profile");
+    }
+  }
+
+  for (const field of ["gender", "activityLevel", "goal", "dietType"]) {
+    if (typeof profile[field] !== "string" || !profile[field]) {
+      throw new FunctionError(`Invalid ${field}.`, 400, "invalid_profile");
+    }
+  }
+}
+
+async function requireAuthenticatedUser(req: Request): Promise<void> {
+  const authorization = req.headers.get("Authorization");
+  const token = authorization?.replace(/^Bearer\s+/i, "");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+
+  if (!token || !supabaseUrl || !anonKey) {
+    throw new FunctionError("Authentication required.", 401, "unauthorized");
+  }
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new FunctionError("Your session is invalid or expired. Please log in again.", 401, "unauthorized");
+  }
 }
 
 function buildPlanPrompt(profile: Profile, feedback?: Feedback[]): string {
@@ -183,6 +253,7 @@ async function callClaude(
 ): Promise<unknown> {
   const res = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
+    signal: AbortSignal.timeout(120_000),
     headers: {
       "content-type": "application/json",
       "x-api-key": apiKey,
@@ -199,23 +270,68 @@ async function callClaude(
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${errText}`);
+    let providerMessage = "";
+    let providerType = "";
+    let requestId = "";
+
+    try {
+      const body = JSON.parse(errText);
+      providerMessage = body?.error?.message || "";
+      providerType = body?.error?.type || "";
+      requestId = body?.request_id || "";
+    } catch {
+      // The provider occasionally returns a non-JSON gateway response.
+    }
+
+    console.error("Anthropic request failed", {
+      status: res.status,
+      providerType,
+      requestId,
+    });
+
+    if (providerMessage.toLowerCase().includes("credit balance")) {
+      throw new FunctionError(
+        "Meal generation is unavailable because the Anthropic API account has no remaining credits. Add credits in Anthropic Plans & Billing, then try again.",
+        402,
+        "ai_credits_exhausted",
+      );
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new FunctionError(
+        "The AI provider credentials are invalid. Update the server-side Anthropic API key.",
+        503,
+        "ai_provider_auth_failed",
+      );
+    }
+    if (res.status === 429) {
+      throw new FunctionError(
+        "The AI provider is rate-limiting requests. Please wait a moment and try again.",
+        429,
+        "ai_rate_limited",
+      );
+    }
+
+    throw new FunctionError(
+      "The AI provider rejected the generation request. Please try again later.",
+      502,
+      "ai_provider_error",
+    );
   }
 
   const data = await res.json();
 
   if (data.stop_reason === "refusal") {
-    throw new Error("The AI declined to generate this content.");
+    throw new FunctionError("The AI declined to generate this content.", 422, "ai_refusal");
   }
   if (data.stop_reason === "max_tokens") {
-    throw new Error("The response was too long and was cut off. Please retry.");
+    throw new FunctionError("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
   }
 
   const textBlock = (data.content || []).find(
     (b: { type: string }) => b.type === "text",
   );
   if (!textBlock?.text) {
-    throw new Error("No content returned from the AI.");
+    throw new FunctionError("No content returned from the AI.", 502, "ai_empty_response");
   }
 
   return JSON.parse(textBlock.text);
@@ -235,20 +351,44 @@ Deno.serve(async (req: Request) => {
     });
 
   try {
+    if (req.method !== "POST") {
+      throw new FunctionError("Method not allowed.", 405, "method_not_allowed");
+    }
+
+    await requireAuthenticatedUser(req);
+
     const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
     if (!apiKey) {
-      return json({ error: "Server is missing ANTHROPIC_API_KEY." }, 500);
+      throw new FunctionError(
+        "Meal generation is not configured. Add the server-side Anthropic API key.",
+        503,
+        "ai_not_configured",
+      );
     }
     const model = Deno.env.get("ANTHROPIC_MODEL") || DEFAULT_MODEL;
 
-    const { action, profile, feedback, mealType } = await req.json();
+    let requestBody: Record<string, unknown>;
+    try {
+      const parsedBody = await req.json();
+      if (!parsedBody || typeof parsedBody !== "object" || Array.isArray(parsedBody)) {
+        throw new Error("Invalid JSON object");
+      }
+      requestBody = parsedBody;
+    } catch {
+      throw new FunctionError("Request body must be valid JSON.", 400, "invalid_json");
+    }
 
-    if (!profile) {
-      return json({ error: "Missing profile." }, 400);
+    const { action, profile, feedback, mealType } = requestBody;
+    assertValidProfile(profile);
+
+    if (feedback !== undefined && (!Array.isArray(feedback) || feedback.length > 28)) {
+      throw new FunctionError("Invalid meal feedback.", 400, "invalid_feedback");
     }
 
     if (action === "meal") {
-      if (!mealType) return json({ error: "Missing mealType." }, 400);
+      if (typeof mealType !== "string" || !allowedMealTypes.has(mealType)) {
+        throw new FunctionError("Invalid mealType.", 400, "invalid_meal_type");
+      }
       const meal = await callClaude(
         apiKey,
         model,
@@ -259,19 +399,35 @@ Deno.serve(async (req: Request) => {
       return json({ data: meal });
     }
 
+    if (action !== "plan") {
+      throw new FunctionError("Invalid action.", 400, "invalid_action");
+    }
+
     // Default: full 7-day plan
     const plan = await callClaude(
       apiKey,
       model,
-      buildPlanPrompt(profile, feedback),
+      buildPlanPrompt(profile, feedback as Feedback[] | undefined),
       mealPlanSchema,
       16000,
     );
     return json({ data: plan });
   } catch (err) {
     console.error("generate-meal-plan error:", err);
+    if (err instanceof FunctionError) {
+      return json(
+        { error: { code: err.code, message: err.message } },
+        err.status,
+      );
+    }
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return json(
+        { error: { code: "ai_timeout", message: "Meal generation took too long. Please try again." } },
+        504,
+      );
+    }
     return json(
-      { error: err instanceof Error ? err.message : "Unknown error" },
+      { error: { code: "internal_error", message: "Meal generation failed unexpectedly. Please try again." } },
       500,
     );
   }
