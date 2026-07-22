@@ -11,28 +11,16 @@
 //          (optional) supabase secrets set OPENAI_MODEL=gpt-5.6-sol
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  createGenerateMealPlanHandler,
+  HttpError,
+  type GenerationRequest,
+} from "./handler.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 // The current recommended GPT-5.6 coding/reasoning model is the default. The
 // OPENAI_MODEL secret can override it without a code deployment.
 const DEFAULT_MODEL = "gpt-5.6-sol";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-class FunctionError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: string,
-  ) {
-    super(message);
-  }
-}
 
 // ---- JSON schemas (structured outputs) -------------------------------------
 // Every object needs additionalProperties:false and a full `required` list.
@@ -131,7 +119,7 @@ const allowedMealTypes = new Set(["breakfast", "lunch", "dinner", "snack"]);
 
 function assertValidProfile(value: unknown): asserts value is Profile {
   if (!value || typeof value !== "object") {
-    throw new FunctionError("Missing profile.", 400, "invalid_profile");
+    throw new HttpError("Missing profile.", 400, "invalid_profile");
   }
 
   const profile = value as Record<string, unknown>;
@@ -144,32 +132,32 @@ function assertValidProfile(value: unknown): asserts value is Profile {
   for (const [field, min, max] of numericRanges) {
     const number = profile[field];
     if (typeof number !== "number" || !Number.isFinite(number) || number < min || number > max) {
-      throw new FunctionError(`Invalid ${field}.`, 400, "invalid_profile");
+      throw new HttpError(`Invalid ${field}.`, 400, "invalid_profile");
     }
   }
 
   if (profile.targetWeightKg !== undefined) {
     const target = profile.targetWeightKg;
     if (typeof target !== "number" || !Number.isFinite(target) || target < 20 || target > 500) {
-      throw new FunctionError("Invalid targetWeightKg.", 400, "invalid_profile");
+      throw new HttpError("Invalid targetWeightKg.", 400, "invalid_profile");
     }
   }
 
   for (const field of ["gender", "activityLevel", "goal", "dietType"]) {
     if (typeof profile[field] !== "string" || !profile[field]) {
-      throw new FunctionError(`Invalid ${field}.`, 400, "invalid_profile");
+      throw new HttpError(`Invalid ${field}.`, 400, "invalid_profile");
     }
   }
 }
 
-async function requireAuthenticatedUser(req: Request): Promise<void> {
+async function requireAuthenticatedUser(req: Request): Promise<{ id: string }> {
   const authorization = req.headers.get("Authorization");
   const token = authorization?.replace(/^Bearer\s+/i, "");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
 
   if (!token || !supabaseUrl || !anonKey) {
-    throw new FunctionError("Authentication required.", 401, "unauthorized");
+    throw new HttpError("Authentication required.", 401, "unauthorized");
   }
 
   const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
@@ -180,8 +168,14 @@ async function requireAuthenticatedUser(req: Request): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new FunctionError("Your session is invalid or expired. Please log in again.", 401, "unauthorized");
+    throw new HttpError("Your session is invalid or expired. Please log in again.", 401, "unauthorized");
   }
+
+  const user = await response.json();
+  if (!user?.id) {
+    throw new HttpError("Your session is invalid or expired. Please log in again.", 401, "unauthorized");
+  }
+  return { id: user.id };
 }
 
 function buildPlanPrompt(profile: Profile, feedback?: Feedback[]): string {
@@ -305,28 +299,28 @@ async function callOpenAI(
       normalizedMessage.includes("billing") ||
       normalizedMessage.includes("credit")
     ) {
-      throw new FunctionError(
+      throw new HttpError(
         "Meal generation is unavailable because the OpenAI API account has no remaining quota. Add API billing or credits in the OpenAI Platform, then try again.",
         402,
         "ai_credits_exhausted",
       );
     }
     if (res.status === 401 || res.status === 403) {
-      throw new FunctionError(
+      throw new HttpError(
         "The AI provider credentials are invalid. Update the server-side OpenAI API key.",
         503,
         "ai_provider_auth_failed",
       );
     }
     if (res.status === 429) {
-      throw new FunctionError(
+      throw new HttpError(
         "The AI provider is rate-limiting requests. Please wait a moment and try again.",
         429,
         "ai_rate_limited",
       );
     }
 
-    throw new FunctionError(
+    throw new HttpError(
       "The AI provider rejected the generation request. Please try again later.",
       502,
       "ai_provider_error",
@@ -339,7 +333,7 @@ async function callOpenAI(
     data.status === "incomplete" &&
     data.incomplete_details?.reason === "max_output_tokens"
   ) {
-    throw new FunctionError("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
+    throw new HttpError("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
   }
 
   const contentBlocks = (data.output || [])
@@ -349,46 +343,29 @@ async function callOpenAI(
     (block: { type?: string }) => block.type === "refusal",
   ) as { refusal?: string } | undefined;
   if (refusalBlock) {
-    throw new FunctionError("The AI declined to generate this content.", 422, "ai_refusal");
+    throw new HttpError("The AI declined to generate this content.", 422, "ai_refusal");
   }
 
   const textBlock = contentBlocks.find(
     (block: { type?: string }) => block.type === "output_text",
   ) as { text?: string } | undefined;
   if (!textBlock?.text) {
-    throw new FunctionError("No content returned from the AI.", 502, "ai_empty_response");
+    throw new HttpError("No content returned from the AI.", 502, "ai_empty_response");
   }
 
   try {
     return JSON.parse(textBlock.text);
   } catch {
-    throw new FunctionError("The AI returned an invalid structured response. Please retry.", 502, "ai_invalid_response");
+    throw new HttpError("The AI returned an invalid structured response. Please retry.", 502, "ai_invalid_response");
   }
 }
 
-// ---- HTTP handler -----------------------------------------------------------
+// ---- Deployed dependency wiring --------------------------------------------
 
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
-
-  const json = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { ...corsHeaders, "content-type": "application/json" },
-    });
-
-  try {
-    if (req.method !== "POST") {
-      throw new FunctionError("Method not allowed.", 405, "method_not_allowed");
-    }
-
-    await requireAuthenticatedUser(req);
-
+async function generate(request: GenerationRequest): Promise<unknown> {
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
-      throw new FunctionError(
+      throw new HttpError(
         "Meal generation is not configured. Add the server-side OpenAI API key.",
         503,
         "ai_not_configured",
@@ -396,27 +373,12 @@ Deno.serve(async (req: Request) => {
     }
     const model = Deno.env.get("OPENAI_MODEL") || DEFAULT_MODEL;
 
-    let requestBody: Record<string, unknown>;
-    try {
-      const parsedBody = await req.json();
-      if (!parsedBody || typeof parsedBody !== "object" || Array.isArray(parsedBody)) {
-        throw new Error("Invalid JSON object");
-      }
-      requestBody = parsedBody;
-    } catch {
-      throw new FunctionError("Request body must be valid JSON.", 400, "invalid_json");
-    }
-
-    const { action, profile, feedback, mealType } = requestBody;
+    const { action, profile, feedback, mealType } = request;
     assertValidProfile(profile);
-
-    if (feedback !== undefined && (!Array.isArray(feedback) || feedback.length > 28)) {
-      throw new FunctionError("Invalid meal feedback.", 400, "invalid_feedback");
-    }
 
     if (action === "meal") {
       if (typeof mealType !== "string" || !allowedMealTypes.has(mealType)) {
-        throw new FunctionError("Invalid mealType.", 400, "invalid_meal_type");
+        throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
       }
       const meal = await callOpenAI(
         apiKey,
@@ -426,15 +388,10 @@ Deno.serve(async (req: Request) => {
         mealSchema,
         4000,
       );
-      return json({ data: meal });
+      return meal;
     }
 
-    if (action !== "plan") {
-      throw new FunctionError("Invalid action.", 400, "invalid_action");
-    }
-
-    // Default: full 7-day plan
-    const plan = await callOpenAI(
+    return callOpenAI(
       apiKey,
       model,
       buildPlanPrompt(profile, feedback as Feedback[] | undefined),
@@ -442,24 +399,14 @@ Deno.serve(async (req: Request) => {
       mealPlanSchema,
       16000,
     );
-    return json({ data: plan });
-  } catch (err) {
-    console.error("generate-meal-plan error:", err);
-    if (err instanceof FunctionError) {
-      return json(
-        { error: { code: err.code, message: err.message } },
-        err.status,
-      );
-    }
-    if (err instanceof DOMException && err.name === "TimeoutError") {
-      return json(
-        { error: { code: "ai_timeout", message: "Meal generation took too long. Please try again." } },
-        504,
-      );
-    }
-    return json(
-      { error: { code: "internal_error", message: "Meal generation failed unexpectedly. Please try again." } },
-      500,
-    );
-  }
+}
+
+const handler = createGenerateMealPlanHandler({
+  authenticate: requireAuthenticatedUser,
+  generate,
+  // Persistence is deliberately a boundary even though this prefactoring
+  // ticket does not introduce a durable generation ledger yet.
+  persist: async () => {},
 });
+
+Deno.serve(handler);

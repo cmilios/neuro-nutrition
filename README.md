@@ -19,5 +19,19 @@ View your app in AI Studio: https://ai.studio/apps/drive/1SJRjliEpFlLb4gzF7X53-C
 3. Run the app:
    `npm run dev`  → http://localhost:3000/neuro-nutrition/
 
+## Checks
+
+Run the automated checks alongside the production build:
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+Use `npm test -- App.test.tsx` or
+`npm test -- supabase/functions/generate-meal-plan/handler.test.ts` to run one
+generation seam while iterating.
+
 AI meal generation runs through a Supabase Edge Function that holds the OpenAI
 API key. See [DEPLOYMENT.md](DEPLOYMENT.md) for backend + hosting setup.
