@@ -8,7 +8,7 @@ import AuthScreen from './components/AuthScreen';
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
 import { UserProfile, MealPlan, User, DayPlan, Meal, MealFeedback, Milestone } from './types';
-import { generateMealPlan, regenerateSingleMeal } from './services/geminiService';
+import { generateMealPlan, regenerateSingleMeal } from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { supabase } from './services/supabaseClient';
@@ -38,22 +38,10 @@ const App: React.FC = () => {
   // Check for active session on boot
   // Check for active session on boot & listen for changes
   useEffect(() => {
-    // 1. Get initial session
-    authService.getSessionUser().then(async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        // Avoid double loading if we already have it (unlikely in this flow but good practice)
-        if (loadedUserIdRef.current !== currentUser.id) {
-          loadedUserIdRef.current = currentUser.id;
-          await loadUserData(currentUser.id);
-        }
-      }
-    }).finally(() => {
-      setIsAuthChecking(false);
-    });
-
-    // 2. Listen for auth changes (login, logout, token refresh)
+    // Listen for auth changes (login, logout, token refresh, initial session)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('App: onAuthStateChange event:', event, 'Session user:', session?.user?.id);
+
       if (session?.user) {
         const currentUser: User = {
           id: session.user.id,
@@ -64,10 +52,27 @@ const App: React.FC = () => {
 
         // Use ref to check against the actual currently loaded user, avoiding stale closure issues
         if (loadedUserIdRef.current !== currentUser.id) {
+          console.log('App: User changed/loading. Setting isDataLoading = true');
           loadedUserIdRef.current = currentUser.id;
+
+          // Only show data loading spinner if we aren't already showing the full auth check spinner
+          // (This prevents a double spinner or flicker)
+          // Actually, since we await below, the isAuthChecking will act as the loader for the first run.
+          // We can use isDataLoading for subsequent switches.
+          // But to be safe and simple:
           setIsDataLoading(true);
-          await loadUserData(currentUser.id);
-          setIsDataLoading(false);
+
+          try {
+            await loadUserData(currentUser.id);
+          } catch (err) {
+            console.error("Failed to load user data on auth change:", err);
+            setError("Failed to load your data. Please refresh.");
+          } finally {
+            console.log('App: User data load finished (finally). Setting isDataLoading = false');
+            setIsDataLoading(false);
+          }
+        } else {
+          console.log('App: User already loaded. Skipping loadUserData.');
         }
       } else {
         loadedUserIdRef.current = null;
@@ -76,6 +81,10 @@ const App: React.FC = () => {
         setMealPlan(null);
         setMilestones([]);
       }
+
+      // Initial auth check is done once the first event is processed
+      console.log('App: onAuthStateChange processed. Setting isAuthChecking = false');
+      setIsAuthChecking(false);
     });
 
     return () => {
@@ -97,8 +106,14 @@ const App: React.FC = () => {
     if (loadedUserIdRef.current !== authenticatedUser.id) {
       loadedUserIdRef.current = authenticatedUser.id;
       setIsDataLoading(true);
-      await loadUserData(authenticatedUser.id);
-      setIsDataLoading(false);
+      try {
+        await loadUserData(authenticatedUser.id);
+      } catch (err) {
+        console.error("Failed to load user data on login:", err);
+        setError("Failed to load your data. Please try again.");
+      } finally {
+        setIsDataLoading(false);
+      }
     }
   };
 

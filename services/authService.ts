@@ -23,7 +23,11 @@ export const authService = {
     };
   },
 
-  register: async (email: string, password: string, name: string): Promise<User> => {
+  register: async (
+    email: string,
+    password: string,
+    name: string,
+  ): Promise<{ user: User; needsEmailConfirmation: boolean }> => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -42,13 +46,16 @@ export const authService = {
       throw new Error("Registration succeeded but no user returned");
     }
 
-    // Note: If email confirmation is enabled, the user might not be able to login immediately
-    // or the session might be null.
-    // For this implementation, we assume auto-confirmation or we return the user regardless.
+    // When email confirmation is enabled in Supabase, signUp returns a user but
+    // NO session. In that case the user cannot use the app until they confirm,
+    // so the UI must show a "check your email" state rather than logging them in.
     return {
-      id: data.user.id,
-      email: data.user.email || '',
-      name: name,
+      user: {
+        id: data.user.id,
+        email: data.user.email || '',
+        name: name,
+      },
+      needsEmailConfirmation: !data.session,
     };
   },
 

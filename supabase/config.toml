@@ -1,0 +1,5 @@
+project_id = "cmayisxvronrwvzhyuer"
+
+[functions.generate-meal-plan]
+# Keep JWT verification ON so only authenticated users can call the AI proxy.
+verify_jwt = true

@@ -11,6 +11,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
@@ -21,17 +22,29 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setIsLoading(true);
 
     try {
-      let user;
       if (isLogin) {
-        user = await authService.login(formData.email, formData.password);
+        const user = await authService.login(formData.email, formData.password);
+        onSuccess(user);
       } else {
         if (!formData.name) throw new Error("Name is required");
-        user = await authService.register(formData.email, formData.password, formData.name);
+        const { user, needsEmailConfirmation } = await authService.register(
+          formData.email,
+          formData.password,
+          formData.name,
+        );
+        if (needsEmailConfirmation) {
+          // No session yet — don't log them in; prompt them to confirm first.
+          setInfo(`Almost there! We've sent a confirmation link to ${formData.email}. Please confirm your email, then log in.`);
+          setIsLogin(true);
+          setFormData({ ...formData, password: '' });
+        } else {
+          onSuccess(user);
+        }
       }
-      onSuccess(user);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Authentication failed');
@@ -55,7 +68,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in delay-100">
         <div className="flex gap-4 mb-8 border-b border-slate-100">
           <button
-            onClick={() => { setIsLogin(true); setError(''); }}
+            onClick={() => { setIsLogin(true); setError(''); setInfo(''); }}
             className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
               }`}
           >
@@ -63,7 +76,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
             {isLogin && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-600 rounded-t-full" />}
           </button>
           <button
-            onClick={() => { setIsLogin(false); setError(''); }}
+            onClick={() => { setIsLogin(false); setError(''); setInfo(''); }}
             className={`flex-1 pb-4 text-sm font-semibold transition-colors relative ${!isLogin ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'
               }`}
           >
@@ -75,6 +88,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
         {error && (
           <div className="mb-6 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 font-medium">
             {error}
+          </div>
+        )}
+
+        {info && (
+          <div className="mb-6 p-3 bg-emerald-50 text-emerald-700 text-sm rounded-lg border border-emerald-100 font-medium">
+            {info}
           </div>
         )}
 
@@ -146,8 +165,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       </div>
 
       <p className="mt-8 text-center text-xs text-slate-400">
-        Mock Identity Provider & SQL Store active.<br />
-        Data persists to LocalStorage.
+        Secure authentication & cloud sync powered by Supabase.
       </p>
     </div>
   );

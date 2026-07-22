@@ -38,10 +38,13 @@ export const storageService = {
     const DATA_KEY_PREFIX = 'neuronutrition_data_';
     const localData = localStorage.getItem(`${DATA_KEY_PREFIX}${userId}`);
     if (localData) {
+      console.log('Found local data. Returning immediately and attempting background migration...');
       try {
         const parsed = JSON.parse(localData);
-        // Async migration
-        await supabase
+
+        // Background migration (fire and forget - but log)
+        // We do NOT await this, so the UI unblocks immediately.
+        supabase
           .from('user_data')
           .upsert({
             user_id: userId,
@@ -49,11 +52,19 @@ export const storageService = {
             meal_plan: parsed.mealPlan,
             milestones: parsed.milestones || [],
             updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
+          }, { onConflict: 'user_id' })
+          .then(({ error: migrationError }) => {
+            if (!migrationError) {
+              console.log('Background migration successful, clearing local storage.');
+              localStorage.removeItem(`${DATA_KEY_PREFIX}${userId}`);
+            } else {
+              console.error('Background migration failed:', migrationError);
+            }
+          });
 
         return parsed;
       } catch (e) {
-        console.error("Failed to migrate local data:", e);
+        console.error("Failed to parse local data for migration:", e);
       }
     }
 
