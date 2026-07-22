@@ -14,8 +14,13 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
   createGenerateMealPlanHandler,
   HttpError,
+  ProviderGenerationError,
+  type GenerationRecord,
   type GenerationRequest,
+  type GenerationResult,
 } from "./handler.ts";
+import { createOpenAIUsageRecord } from "./usage.ts";
+import { persistUsageRecordToSupabase } from "./persistence.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 // The current recommended GPT-5.6 coding/reasoning model is the default. The
@@ -245,124 +250,211 @@ async function callOpenAI(
   schemaName: string,
   schema: unknown,
   maxTokens: number,
-): Promise<unknown> {
-  const res = await fetch(OPENAI_API_URL, {
-    method: "POST",
-    signal: AbortSignal.timeout(120_000),
-    headers: {
-      "content-type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      // Profiles contain health-related data; do not retain API responses.
-      store: false,
-      input: [{ role: "user", content: prompt }],
-      reasoning: { effort: "low" },
-      max_output_tokens: maxTokens,
-      text: {
-        format: {
-          type: "json_schema",
-          name: schemaName,
-          strict: true,
-          schema,
-        },
+): Promise<GenerationResult> {
+  const callId = crypto.randomUUID();
+  let res: Response;
+  try {
+    res = await fetch(OPENAI_API_URL, {
+      method: "POST",
+      signal: AbortSignal.timeout(120_000),
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       },
-    }),
-  });
+      body: JSON.stringify({
+        model,
+        // Profiles contain health-related data; do not retain API responses.
+        store: false,
+        input: [{ role: "user", content: prompt }],
+        reasoning: { effort: "low" },
+        max_output_tokens: maxTokens,
+        text: {
+          format: {
+            type: "json_schema",
+            name: schemaName,
+            strict: true,
+            schema,
+          },
+        },
+      }),
+    });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    const code = timedOut ? "ai_timeout" : "ai_provider_error";
+    throw new ProviderGenerationError(
+      timedOut
+        ? "Meal generation took too long. Please try again."
+        : "The AI provider request failed. Please try again later.",
+      timedOut ? 504 : 502,
+      code,
+      createOpenAIUsageRecord({
+        callId,
+        attempt: 1,
+        configuredModel: model,
+        outcome: "failure",
+        errorCode: code,
+      }),
+    );
+  }
+
+  const requestId = res.headers.get("x-request-id") || undefined;
 
   if (!res.ok) {
-    const errText = await res.text();
+    let errText = "";
+    try {
+      errText = await res.text();
+    } catch {
+      // The status and request ID still identify this provider attempt even if
+      // the response body stream cannot be read.
+    }
     let providerMessage = "";
     let providerCode = "";
-    let requestId = "";
+    let errorBody: Record<string, unknown> | undefined;
 
     try {
-      const body = JSON.parse(errText);
-      providerMessage = body?.error?.message || "";
-      providerCode = body?.error?.code || body?.error?.type || "";
-      requestId = res.headers.get("x-request-id") || "";
+      const parsed = JSON.parse(errText);
+      if (parsed && typeof parsed === "object") errorBody = parsed;
+      const providerError = errorBody?.error as Record<string, unknown> | undefined;
+      providerMessage = typeof providerError?.message === "string" ? providerError.message : "";
+      const rawProviderCode = providerError?.code ?? providerError?.type;
+      providerCode = typeof rawProviderCode === "string" ? rawProviderCode : "";
     } catch {
       // The provider occasionally returns a non-JSON gateway response.
     }
 
-    console.error("OpenAI request failed", {
-      status: res.status,
-      providerCode,
-      requestId,
-    });
-
     const normalizedMessage = providerMessage.toLowerCase();
+    let httpError: HttpError;
     if (
       providerCode === "insufficient_quota" ||
       normalizedMessage.includes("quota") ||
       normalizedMessage.includes("billing") ||
       normalizedMessage.includes("credit")
     ) {
-      throw new HttpError(
+      httpError = new HttpError(
         "Meal generation is unavailable because the OpenAI API account has no remaining quota. Add API billing or credits in the OpenAI Platform, then try again.",
         402,
         "ai_credits_exhausted",
       );
-    }
-    if (res.status === 401 || res.status === 403) {
-      throw new HttpError(
+    } else if (res.status === 401 || res.status === 403) {
+      httpError = new HttpError(
         "The AI provider credentials are invalid. Update the server-side OpenAI API key.",
         503,
         "ai_provider_auth_failed",
       );
-    }
-    if (res.status === 429) {
-      throw new HttpError(
+    } else if (res.status === 429) {
+      httpError = new HttpError(
         "The AI provider is rate-limiting requests. Please wait a moment and try again.",
         429,
         "ai_rate_limited",
       );
+    } else {
+      httpError = new HttpError(
+        "The AI provider rejected the generation request. Please try again later.",
+        502,
+        "ai_provider_error",
+      );
     }
 
-    throw new HttpError(
-      "The AI provider rejected the generation request. Please try again later.",
-      502,
-      "ai_provider_error",
+    throw new ProviderGenerationError(
+      httpError.message,
+      httpError.status,
+      httpError.code,
+      createOpenAIUsageRecord({
+        callId,
+        attempt: 1,
+        configuredModel: model,
+        providerRequestId: requestId,
+        response: errorBody,
+        outcome: "failure",
+        errorCode: httpError.code,
+      }),
     );
   }
 
-  const data = await res.json();
+  let responseBody: Record<string, unknown>;
+  try {
+    const parsed: unknown = await res.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new TypeError("Provider response must be a JSON object");
+    }
+    responseBody = parsed as Record<string, unknown>;
+  } catch {
+    throw new ProviderGenerationError(
+      "The AI returned an invalid response. Please retry.",
+      502,
+      "ai_invalid_response",
+      createOpenAIUsageRecord({
+        callId,
+        attempt: 1,
+        configuredModel: model,
+        providerRequestId: requestId,
+        outcome: "failure",
+        errorCode: "ai_invalid_response",
+      }),
+    );
+  }
+  const failure = (message: string, status: number, code: string) =>
+    new ProviderGenerationError(
+      message,
+      status,
+      code,
+      createOpenAIUsageRecord({
+        callId,
+        attempt: 1,
+        configuredModel: model,
+        providerRequestId: requestId,
+        response: responseBody,
+        outcome: "failure",
+        errorCode: code,
+      }),
+    );
 
   if (
-    data.status === "incomplete" &&
-    data.incomplete_details?.reason === "max_output_tokens"
+    responseBody.status === "incomplete" &&
+    (responseBody.incomplete_details as { reason?: string } | undefined)?.reason === "max_output_tokens"
   ) {
-    throw new HttpError("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
+    throw failure("The response was too long and was cut off. Please retry.", 502, "ai_response_truncated");
   }
 
-  const contentBlocks = (data.output || [])
-    .filter((item: { type?: string }) => item.type === "message")
-    .flatMap((item: { content?: unknown[] }) => item.content || []);
-  const refusalBlock = contentBlocks.find(
-    (block: { type?: string }) => block.type === "refusal",
-  ) as { refusal?: string } | undefined;
+  const output = Array.isArray(responseBody.output) ? responseBody.output : [];
+  const contentBlocks = output
+    .filter((item): item is { type?: string; content?: unknown[] } =>
+      Boolean(item && typeof item === "object" && (item as { type?: string }).type === "message")
+    )
+    .flatMap((item) => item.content || [])
+    .filter((block): block is Record<string, unknown> =>
+      Boolean(block && typeof block === "object")
+    );
+  const refusalBlock = contentBlocks.find((block) => block.type === "refusal");
   if (refusalBlock) {
-    throw new HttpError("The AI declined to generate this content.", 422, "ai_refusal");
+    throw failure("The AI declined to generate this content.", 422, "ai_refusal");
   }
 
-  const textBlock = contentBlocks.find(
-    (block: { type?: string }) => block.type === "output_text",
-  ) as { text?: string } | undefined;
-  if (!textBlock?.text) {
-    throw new HttpError("No content returned from the AI.", 502, "ai_empty_response");
+  const textBlock = contentBlocks.find((block) => block.type === "output_text");
+  if (typeof textBlock?.text !== "string" || !textBlock.text) {
+    throw failure("No content returned from the AI.", 502, "ai_empty_response");
   }
 
   try {
-    return JSON.parse(textBlock.text);
+    return {
+      data: JSON.parse(textBlock.text),
+      usageRecord: createOpenAIUsageRecord({
+        callId,
+        attempt: 1,
+        configuredModel: model,
+        providerRequestId: requestId,
+        response: responseBody,
+        outcome: "success",
+      }),
+    };
   } catch {
-    throw new HttpError("The AI returned an invalid structured response. Please retry.", 502, "ai_invalid_response");
+    throw failure("The AI returned an invalid structured response. Please retry.", 502, "ai_invalid_response");
   }
 }
 
 // ---- Deployed dependency wiring --------------------------------------------
 
-async function generate(request: GenerationRequest): Promise<unknown> {
+async function generate(request: GenerationRequest): Promise<GenerationResult> {
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (!apiKey) {
       throw new HttpError(
@@ -380,7 +472,7 @@ async function generate(request: GenerationRequest): Promise<unknown> {
       if (typeof mealType !== "string" || !allowedMealTypes.has(mealType)) {
         throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
       }
-      const meal = await callOpenAI(
+      return callOpenAI(
         apiKey,
         model,
         buildMealPrompt(profile, mealType),
@@ -388,7 +480,6 @@ async function generate(request: GenerationRequest): Promise<unknown> {
         mealSchema,
         4000,
       );
-      return meal;
     }
 
     return callOpenAI(
@@ -401,12 +492,20 @@ async function generate(request: GenerationRequest): Promise<unknown> {
     );
 }
 
+async function persistUsageRecord(record: GenerationRecord): Promise<void> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("AI usage persistence is not configured");
+  }
+
+  await persistUsageRecordToSupabase(record, { supabaseUrl, serviceRoleKey });
+}
+
 const handler = createGenerateMealPlanHandler({
   authenticate: requireAuthenticatedUser,
   generate,
-  // Persistence is deliberately a boundary even though this prefactoring
-  // ticket does not introduce a durable generation ledger yet.
-  persist: async () => {},
+  persist: persistUsageRecord,
 });
 
 Deno.serve(handler);

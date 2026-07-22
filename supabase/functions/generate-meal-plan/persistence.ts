@@ -1,0 +1,75 @@
+import type { GenerationRecord } from "./handler.ts";
+
+interface PersistenceOptions {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  fetchImpl?: typeof fetch;
+  delay?: (milliseconds: number) => Promise<void>;
+}
+
+const defaultDelay = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+export async function persistUsageRecordToSupabase(
+  record: GenerationRecord,
+  options: PersistenceOptions,
+): Promise<void> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const delay = options.delay ?? defaultDelay;
+  const body = JSON.stringify({
+    call_id: record.callId,
+    user_id: record.userId,
+    action: record.action,
+    attempt: record.attempt,
+    provider: record.provider,
+    model: record.model,
+    provider_response_id: record.providerResponseId,
+    provider_request_id: record.providerRequestId,
+    input_tokens: record.inputTokens,
+    cached_input_tokens: record.cachedInputTokens,
+    cache_write_input_tokens: record.cacheWriteInputTokens,
+    output_tokens: record.outputTokens,
+    reasoning_output_tokens: record.reasoningOutputTokens,
+    total_tokens: record.totalTokens,
+    raw_usage: record.rawUsage,
+    outcome: record.outcome,
+    validation_codes: record.validationCodes,
+    error_code: record.errorCode,
+    estimated_cost_usd: record.estimatedCostUsd,
+    pricing_version: record.pricingVersion,
+    pricing_snapshot: record.pricingSnapshot,
+  });
+
+  let lastStatus: number | undefined;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetchImpl(
+        `${options.supabaseUrl}/rest/v1/ai_usage_records?on_conflict=call_id`,
+        {
+          method: "POST",
+          headers: {
+            apikey: options.serviceRoleKey,
+            Authorization: `Bearer ${options.serviceRoleKey}`,
+            "content-type": "application/json",
+            Prefer: "resolution=ignore-duplicates,return=minimal",
+          },
+          body,
+        },
+      );
+
+      if (response.ok) return;
+      lastStatus = response.status;
+      if (response.status < 500 || attempt === 3) break;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 3) break;
+    }
+
+    await delay(attempt * 50);
+  }
+
+  throw new Error("AI Usage Record insert failed", {
+    cause: lastError ?? (lastStatus ? new Error(`HTTP ${lastStatus}`) : undefined),
+  });
+}

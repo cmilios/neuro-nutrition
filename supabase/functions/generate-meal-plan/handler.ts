@@ -9,16 +9,41 @@ export interface GenerationRequest {
   mealType?: string;
 }
 
-export interface GenerationRecord {
+export interface ProviderUsageRecord {
+  callId: string;
+  attempt: number;
+  model: string;
+  provider: string;
+  providerResponseId?: string;
+  providerRequestId?: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+  rawUsage?: Record<string, unknown>;
+  outcome: "success" | "failure";
+  validationCodes?: string[];
+  errorCode?: string;
+  estimatedCostUsd?: number;
+  pricingVersion?: string;
+  pricingSnapshot?: Record<string, unknown>;
+}
+
+export interface GenerationResult {
+  data: unknown;
+  usageRecord: ProviderUsageRecord;
+}
+
+export interface GenerationRecord extends ProviderUsageRecord {
   userId: string;
   action: GenerationRequest["action"];
-  outcome: "success" | "failure";
-  errorCode?: string;
 }
 
 export interface GenerateMealPlanDependencies {
   authenticate(request: Request): Promise<GenerationUser>;
-  generate(request: GenerationRequest): Promise<unknown>;
+  generate(request: GenerationRequest): Promise<GenerationResult>;
   persist(record: GenerationRecord): Promise<void>;
 }
 
@@ -29,6 +54,17 @@ export class HttpError extends Error {
     readonly code: string,
   ) {
     super(message);
+  }
+}
+
+export class ProviderGenerationError extends HttpError {
+  constructor(
+    message: string,
+    status: number,
+    code: string,
+    readonly usageRecord: ProviderUsageRecord,
+  ) {
+    super(message, status, code);
   }
 }
 
@@ -68,6 +104,16 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
 }
 
 export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDependencies) {
+  const persist = async (
+    user: GenerationUser,
+    request: GenerationRequest,
+    usageRecord: ProviderUsageRecord,
+  ) => dependencies.persist({
+    userId: user.id,
+    action: request.action,
+    ...usageRecord,
+  });
+
   return async (request: Request): Promise<Response> => {
     if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -96,22 +142,42 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         throw new HttpError("Request body must be valid JSON.", 400, "invalid_json");
       }
 
-      const data = await dependencies.generate(generationRequest);
-      await dependencies.persist({ userId: user.id, action: generationRequest.action, outcome: "success" });
-      return json({ data });
+      const result = await dependencies.generate(generationRequest);
+      try {
+        await persist(user, generationRequest, result.usageRecord);
+      } catch {
+        console.error("Failed to persist AI Usage Record after retries", {
+          userId: user.id,
+          action: generationRequest.action,
+          callId: result.usageRecord.callId,
+          attempt: result.usageRecord.attempt,
+          providerRequestId: result.usageRecord.providerRequestId,
+          providerResponseId: result.usageRecord.providerResponseId,
+        });
+      }
+      return json({ data: result.data });
     } catch (error) {
-      if (user && generationRequest) {
-        const errorCode = error instanceof HttpError ? error.code : "internal_error";
+      if (error instanceof ProviderGenerationError && user && generationRequest) {
         try {
-          await dependencies.persist({
+          await persist(user, generationRequest, error.usageRecord);
+        } catch {
+          console.error("Failed to persist AI Usage Record after retries", {
             userId: user.id,
             action: generationRequest.action,
-            outcome: "failure",
-            errorCode,
+            callId: error.usageRecord.callId,
+            attempt: error.usageRecord.attempt,
+            providerRequestId: error.usageRecord.providerRequestId,
+            providerResponseId: error.usageRecord.providerResponseId,
           });
-        } catch (persistenceError) {
-          console.error("Failed to persist generation outcome:", persistenceError);
         }
+        console.error("AI provider call failed", {
+          userId: user.id,
+          action: generationRequest.action,
+          attempt: error.usageRecord.attempt,
+          errorCode: error.code,
+          providerRequestId: error.usageRecord.providerRequestId,
+          providerResponseId: error.usageRecord.providerResponseId,
+        });
       }
 
       if (error instanceof HttpError) {

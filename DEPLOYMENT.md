@@ -44,6 +44,32 @@ In **Supabase → Authentication → Providers → Email**, decide on "Confirm e
   now handles this (shows a "check your email" message instead of a broken login).
 - **OFF** → users can log in immediately after signing up (simpler for testing).
 
+### AI usage ledger
+
+Before deploying the issue #3 Edge Function, apply the committed database
+migrations with the Supabase CLI. The function writes one immutable
+`ai_usage_records` row per OpenAI call through its server-side service role.
+The `anon` and `authenticated` roles have no table or reporting-view access.
+
+The migration creates a no-login `ai_usage_reader` role with read-only access.
+Operators can inspect per-user totals from the SQL editor while explicitly
+assuming that role:
+
+```sql
+begin;
+set local role ai_usage_reader;
+
+select *
+from public.ai_usage_by_user
+order by estimated_cost_usd desc nulls last;
+
+commit;
+```
+
+The estimate is an operational snapshot, not an invoice. Raw provider usage and
+the pricing version/snapshot remain stored so historical calculations are
+auditable if rates change.
+
 ## 2. Frontend hosting (GitHub Pages) — already configured
 
 `.github/workflows/deploy.yml` builds and deploys on every push to `main`.
