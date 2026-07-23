@@ -52,6 +52,10 @@ _Avoid_: Refresh, regenerate plan
 One position in a Weekly Plan, identified by its day and meal type.
 _Avoid_: Position, time
 
+**Start Over**:
+The user command that removes the Current Weekly Plan by deactivating it while preserving the user's profile, milestones, AI Usage Records, and inactive plan history. It is distinct from permanent account-data deletion.
+_Avoid_: Reset account, delete account
+
 **Next Weekly Plan**:
 The variety-focused successor to the current Weekly Plan, evaluated only against that immediately preceding plan. It retains each Liked Meal as an exact recipe copy under the same meal type on a different day and replaces Disliked and Uncooked Meals; after an Empty Meal Review, the planner may retain at most seven Same Meals chosen to preserve nutritional balance and weekly variety, and must change at least twenty-one. Every retained meal keeps its meal type but moves to a different day.
 _Avoid_: Random plan, reset plan
