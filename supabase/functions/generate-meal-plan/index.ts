@@ -287,7 +287,10 @@ function buildNextWeeklyPlanPrompt(request: GenerationRequest, profile: Profile)
   `;
 }
 
-function buildMealPrompt(profile: Profile, mealType: string): string {
+function buildMealPrompt(request: GenerationRequest, profile: Profile, mealType: string): string {
+  const repair = request.validationDetails?.length
+    ? `The previous result failed these rules: ${request.validationDetails.join(", ")}. Repair every listed rule.`
+    : "";
   return `
     Act as a world-class nutritionist.
     Generate a single delicious ${mealType} option for a user with this profile:
@@ -295,8 +298,14 @@ function buildMealPrompt(profile: Profile, mealType: string): string {
     - Diet: ${profile.dietType}
     - Allergies: ${profile.allergies || "None"}
 
+    The current ${mealType} is:
+    ${JSON.stringify(request.currentMeal)}
+
+    Generate a different ${mealType}. A renamed recipe with the same normalized
+    ingredients and preparation is still the Same Meal and is invalid.
     Ensure the meal is balanced and appropriate for the requested meal type.
     Include detailed step-by-step cooking instructions and prep/cook times.
+    ${repair}
   `;
 }
 
@@ -535,9 +544,16 @@ async function generate(request: GenerationRequest): Promise<GenerationResult> {
       return callOpenAI(
         apiKey,
         model,
-        buildMealPrompt(profile, mealType),
+        buildMealPrompt(request, profile, mealType),
         "meal",
-        mealSchema,
+        {
+          ...mealSchema,
+          properties: {
+            ...mealSchema.properties,
+            mealType: { type: "string", enum: [mealType] },
+          },
+          required: [...mealSchema.required, "mealType"],
+        },
         4000,
         attempt,
       );

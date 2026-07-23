@@ -59,6 +59,7 @@ export const generateMealPlan = async (
 export const regenerateSingleMeal = async (
   profile: UserProfile,
   mealType: string,
+  currentMeal: Meal,
 ): Promise<Meal> => {
-  return invokeAI<Meal>({ action: "meal", profile, mealType });
+  return invokeAI<Meal>({ action: "meal", profile, mealType, currentMeal });
 };

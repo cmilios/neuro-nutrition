@@ -1,6 +1,9 @@
 import {
   NextWeeklyPlanValidationError,
   validateNextWeeklyPlan,
+  isSameMeal,
+  validMeal,
+  type Meal,
   type WeeklyPlan,
   type MealReviewFeedback,
 } from "./nextWeeklyPlan.ts";
@@ -14,6 +17,7 @@ export interface GenerationRequest {
   profile: Record<string, unknown>;
   feedback?: MealReviewFeedback[];
   mealType?: string;
+  currentMeal?: Meal;
   currentPlan?: WeeklyPlan;
   reviewType?: "empty" | "partial";
   attempt?: number;
@@ -171,6 +175,9 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
   if (body.action === "meal" && (typeof body.mealType !== "string" || !allowedMealTypes.has(body.mealType))) {
     throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
   }
+  if (body.action === "meal" && !validMeal(body.currentMeal)) {
+    throw new HttpError("The current meal is required.", 400, "missing_current_meal");
+  }
 
   return body as unknown as GenerationRequest;
 }
@@ -192,6 +199,7 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
   ) => {
     try {
       await persist(user, request, usageRecord);
+      return true;
     } catch {
       console.error("Failed to persist AI Usage Record after retries", {
         userId: user.id,
@@ -201,6 +209,7 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         providerRequestId: usageRecord.providerRequestId,
         providerResponseId: usageRecord.providerResponseId,
       });
+      return false;
     }
   };
 
@@ -236,9 +245,12 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         generationRequest.action === "plan" &&
         (generationRequest.reviewType === "empty" || generationRequest.reviewType === "partial") &&
         generationRequest.currentPlan;
+      const isMealReroll =
+        generationRequest.action === "meal" &&
+        generationRequest.currentMeal;
       let validationDetails: string[] | undefined;
 
-      for (let attempt = 1; attempt <= (isNextWeeklyPlanReview ? 2 : 1); attempt += 1) {
+      for (let attempt = 1; attempt <= (isNextWeeklyPlanReview || isMealReroll ? 2 : 1); attempt += 1) {
         const attemptRequest = { ...generationRequest, attempt, validationDetails };
         const result = await dependencies.generate(attemptRequest);
 
@@ -271,12 +283,59 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
               providerResponseId: result.usageRecord.providerResponseId,
             });
           }
+        } else if (isMealReroll) {
+          const returnedMealType = result.data && typeof result.data === "object"
+            ? (result.data as Record<string, unknown>).mealType
+            : undefined;
+          const validationCode = !validMeal(result.data)
+            ? "invalid_meal"
+            : returnedMealType !== generationRequest.mealType
+            ? "wrong_meal_type"
+            : isSameMeal(generationRequest.currentMeal!, result.data)
+            ? "same_meal"
+            : undefined;
+          if (validationCode) {
+            validationDetails = [validationCode];
+            await persistAndReport(user, generationRequest, {
+              ...result.usageRecord,
+              outcome: "failure",
+              validationCodes: validationDetails,
+              errorCode: "invalid_meal_reroll",
+            });
+            console.error("Meal Reroll validation failed", {
+              userId: user.id,
+              attempt,
+              failedRules: validationDetails,
+              mealType: generationRequest.mealType,
+              timestamp: new Date().toISOString(),
+              providerRequestId: result.usageRecord.providerRequestId,
+              providerResponseId: result.usageRecord.providerResponseId,
+            });
+          } else {
+            const persisted = await persistAndReport(user, generationRequest, result.usageRecord);
+            if (!persisted) {
+              throw new HttpError(
+                "Meal generation could not be recorded. Your original meal is unchanged.",
+                503,
+                "usage_persistence_failed",
+              );
+            }
+            const { mealType: _mealType, ...meal } = result.data as Meal & { mealType: string };
+            return json({ data: meal });
+          }
         } else {
           await persistAndReport(user, generationRequest, result.usageRecord);
           return json({ data: result.data });
         }
       }
 
+      if (isMealReroll) {
+        throw new HttpError(
+          "A different meal was not created. Your original meal is unchanged.",
+          422,
+          "invalid_meal_reroll",
+        );
+      }
       throw new HttpError(
         "A valid Next Weekly Plan was not created. Your current plan is unchanged.",
         422,

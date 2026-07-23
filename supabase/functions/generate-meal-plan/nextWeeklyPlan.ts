@@ -9,7 +9,7 @@ interface Macros {
   fats: number;
 }
 
-interface Meal {
+export interface Meal {
   name: string;
   description: string;
   ingredients: string[];
@@ -56,6 +56,9 @@ const sameMealIdentity = (meal: Meal) => JSON.stringify({
   preparation: meal.instructions.map(normalize),
 });
 
+export const isSameMeal = (original: Meal, candidate: Meal) =>
+  sameMealIdentity(original) === sameMealIdentity(candidate);
+
 const exactRecipe = (meal: Meal) => JSON.stringify({
   name: meal.name,
   description: meal.description,
@@ -67,7 +70,7 @@ const exactRecipe = (meal: Meal) => JSON.stringify({
   portions: meal.portions ?? null,
 });
 
-const validMeal = (value: unknown): value is Meal => {
+export const validMeal = (value: unknown): value is Meal => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const meal = value as Partial<Meal>;
   return typeof meal.name === "string" &&

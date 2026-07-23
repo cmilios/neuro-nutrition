@@ -7,6 +7,7 @@ interface PlanDashboardProps {
   plan: MealPlan;
   onReroll: (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => void;
   rerollingState: { dayIndex: number; mealType: string } | null;
+  rerollRetry: { dayIndex: number; mealType: string } | null;
   onToggleIngredient: (dayIndex: number, mealType: string, ingredient: string) => void;
 }
 
@@ -14,6 +15,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
   plan, 
   onReroll, 
   rerollingState,
+  rerollRetry,
   onToggleIngredient
 }) => {
   const [activeDayIndex, setActiveDayIndex] = useState(0);
@@ -35,6 +37,8 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
 
   const isRerolling = (type: string) => 
     rerollingState?.dayIndex === activeDayIndex && rerollingState?.mealType === type;
+  const canRetry = (type: string) =>
+    rerollRetry?.dayIndex === activeDayIndex && rerollRetry?.mealType === type;
 
   const handleMealClick = (type: string, meal: Meal) => {
     setSelectedMeal({ dayIndex: activeDayIndex, type, meal });
@@ -99,6 +103,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           color="emerald" 
           onReroll={() => onReroll(activeDayIndex, 'breakfast')}
           isLoading={isRerolling('breakfast')}
+          canRetry={canRetry('breakfast')}
           onClick={() => handleMealClick('Breakfast', activeDay.breakfast)}
         />
         <MealCard 
@@ -107,6 +112,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           color="amber" 
           onReroll={() => onReroll(activeDayIndex, 'lunch')}
           isLoading={isRerolling('lunch')}
+          canRetry={canRetry('lunch')}
           onClick={() => handleMealClick('Lunch', activeDay.lunch)}
         />
         <MealCard 
@@ -115,6 +121,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           color="indigo" 
           onReroll={() => onReroll(activeDayIndex, 'dinner')}
           isLoading={isRerolling('dinner')}
+          canRetry={canRetry('dinner')}
           onClick={() => handleMealClick('Dinner', activeDay.dinner)}
         />
         <MealCard 
@@ -123,6 +130,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           color="rose" 
           onReroll={() => onReroll(activeDayIndex, 'snack')}
           isLoading={isRerolling('snack')}
+          canRetry={canRetry('snack')}
           onClick={() => handleMealClick('Snack', activeDay.snack)}
         />
       </div>
@@ -158,9 +166,10 @@ interface MealCardProps {
   onReroll: () => void;
   onClick: () => void;
   isLoading: boolean;
+  canRetry: boolean;
 }
 
-const MealCard: React.FC<MealCardProps> = ({ type, meal, color, onReroll, onClick, isLoading }) => {
+const MealCard: React.FC<MealCardProps> = ({ type, meal, color, onReroll, onClick, isLoading, canRetry }) => {
   const colorStyles = {
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
     amber: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -189,7 +198,8 @@ const MealCard: React.FC<MealCardProps> = ({ type, meal, color, onReroll, onClic
             onClick={(e) => { e.stopPropagation(); onReroll(); }}
             disabled={isLoading}
             className="p-1.5 hover:bg-white/60 rounded-md transition-colors text-current opacity-70 hover:opacity-100"
-            title="Reroll this meal"
+            title={canRetry ? "Try Again" : "Reroll this meal"}
+            aria-label={canRetry ? "Try Again" : "Reroll this meal"}
           >
             <RefreshCw size={14} />
           </button>

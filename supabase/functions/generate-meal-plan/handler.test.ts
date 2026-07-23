@@ -148,7 +148,14 @@ describe("generate-meal-plan HTTP contract", () => {
   });
 
   it("returns a rerolled meal through the existing HTTP contract", async () => {
-    const meal = { name: "Rerolled Breakfast" };
+    const originalMeal = weeklyPlanFixture.days[0].breakfast;
+    const meal = {
+      ...originalMeal,
+      mealType: "breakfast",
+      name: "Rerolled Breakfast",
+      ingredients: ["new breakfast ingredient"],
+      instructions: ["prepare the new breakfast"],
+    };
     const generate = vi.fn().mockResolvedValue({
       data: meal,
       usageRecord: {
@@ -169,11 +176,17 @@ describe("generate-meal-plan HTTP contract", () => {
     const response = await handler(new Request("http://localhost/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "meal", mealType: "breakfast", profile }),
+      body: JSON.stringify({
+        action: "meal",
+        mealType: "breakfast",
+        currentMeal: originalMeal,
+        profile,
+      }),
     }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ data: meal });
+    const { mealType: _mealType, ...returnedMeal } = meal;
+    expect(await response.json()).toEqual({ data: returnedMeal });
     expect(generate).toHaveBeenCalledWith(expect.objectContaining({ action: "meal", mealType: "breakfast" }));
     expect(persist).toHaveBeenCalledTimes(1);
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({
@@ -181,6 +194,163 @@ describe("generate-meal-plan HTTP contract", () => {
       action: "meal",
       attempt: 1,
       outcome: "success",
+    }));
+  });
+
+  it("retries one Same Meal result with validation details and attributes both attempts", async () => {
+    const originalMeal = weeklyPlanFixture.days[0].breakfast;
+    const replacement = {
+      ...originalMeal,
+      name: "Different Breakfast",
+      ingredients: ["different ingredient"],
+      instructions: ["different preparation"],
+    };
+    const generate = vi.fn()
+      .mockResolvedValueOnce({
+        data: { ...originalMeal, mealType: "breakfast", name: "Renamed Same Breakfast" },
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000103",
+          attempt: 1,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      })
+      .mockResolvedValueOnce({
+        data: { ...replacement, mealType: "breakfast" },
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000104",
+          attempt: 2,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      });
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-reroll" }),
+      generate,
+      persist,
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "meal",
+        mealType: "breakfast",
+        currentMeal: originalMeal,
+        profile,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: replacement });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      attempt: 2,
+      validationDetails: ["same_meal"],
+    }));
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      userId: "user-reroll",
+      action: "meal",
+      attempt: 1,
+      outcome: "failure",
+      validationCodes: ["same_meal"],
+    }));
+    expect(persist).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      userId: "user-reroll",
+      action: "meal",
+      attempt: 2,
+      outcome: "success",
+    }));
+  });
+
+  it("returns terminal reroll failure after two Same Meals without returning a replacement", async () => {
+    const originalMeal = weeklyPlanFixture.days[0].breakfast;
+    const generate = vi.fn().mockImplementation(({ attempt }) => Promise.resolve({
+      data: {
+        ...originalMeal,
+        mealType: "breakfast",
+        name: `Renamed Same Breakfast ${attempt}`,
+      },
+      usageRecord: createOpenAIUsageRecord({
+        callId: `00000000-0000-4000-8000-00000000010${attempt + 4}`,
+        attempt,
+        configuredModel: "gpt-5.6-sol",
+        outcome: "success",
+      }),
+    }));
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-reroll" }),
+      generate,
+      persist,
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "meal",
+        mealType: "breakfast",
+        currentMeal: originalMeal,
+        profile,
+      }),
+    }));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "invalid_meal_reroll",
+        message: "A different meal was not created. Your original meal is unchanged.",
+      },
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith("Meal Reroll validation failed", expect.objectContaining({
+      userId: "user-reroll",
+      attempt: 2,
+      failedRules: ["same_meal"],
+    }));
+    errorSpy.mockRestore();
+  });
+
+  it("rejects a replacement that does not preserve the requested meal type", async () => {
+    const originalMeal = weeklyPlanFixture.days[0].breakfast;
+    const generate = vi.fn().mockImplementation(({ attempt }) => Promise.resolve({
+      data: {
+        ...originalMeal,
+        mealType: "lunch",
+        ingredients: [`different ingredient ${attempt}`],
+      },
+      usageRecord: createOpenAIUsageRecord({
+        callId: `00000000-0000-4000-8000-00000000011${attempt}`,
+        attempt,
+        configuredModel: "gpt-5.6-sol",
+        outcome: "success",
+      }),
+    }));
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-reroll" }),
+      generate,
+      persist: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "meal",
+        mealType: "breakfast",
+        currentMeal: originalMeal,
+        profile,
+      }),
+    }));
+
+    expect(response.status).toBe(422);
+    expect(generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      validationDetails: ["wrong_meal_type"],
     }));
   });
 

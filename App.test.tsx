@@ -92,18 +92,103 @@ describe("application generation flow", () => {
 
     expect(await screen.findByText("Rerolled Breakfast")).toBeInTheDocument();
     expect(edgeFunctionInvoke).toHaveBeenCalledWith("generate-meal-plan", {
-      body: expect.objectContaining({ action: "meal", mealType: "breakfast" }),
+      body: expect.objectContaining({
+        action: "meal",
+        mealType: "breakfast",
+        currentMeal: weeklyPlanFixture.days[0].breakfast,
+      }),
     });
     expect(saveUserData).toHaveBeenCalledWith(
       "user-1",
       profile,
       expect.objectContaining({
         days: expect.arrayContaining([
-          expect.objectContaining({ breakfast: rerolledMeal }),
+          expect.objectContaining({
+            breakfast: rerolledMeal,
+            lunch: weeklyPlanFixture.days[0].lunch,
+            dailySummary: {
+              calories: 1650,
+              protein: 125,
+              carbs: 162,
+              fats: 50,
+            },
+          }),
         ]),
       }),
       [],
     );
+  });
+
+  it("preserves the original meal and reuses the in-memory Meal Reroll request through Try Again", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    const replacement = {
+      ...weeklyPlanFixture.days[0].breakfast,
+      name: "Successful Retry Breakfast",
+      ingredients: ["replacement ingredient"],
+    };
+    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    edgeFunctionInvoke
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "A different meal was not created. Your original meal is unchanged." },
+      })
+      .mockResolvedValueOnce({ data: { data: replacement }, error: null });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getAllByTitle("Reroll this meal")[0]);
+
+    expect(await screen.findByText("A different meal was not created. Your original meal is unchanged."))
+      .toBeInTheDocument();
+    expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(saveUserData).not.toHaveBeenCalled();
+    const firstRequest = edgeFunctionInvoke.mock.calls[0][1];
+    const tryAgain = screen.getByRole("button", { name: "Try Again" });
+
+    await user.click(tryAgain);
+
+    expect(await screen.findByText("Successful Retry Breakfast")).toBeInTheDocument();
+    expect(edgeFunctionInvoke.mock.calls[1][1]).toEqual(firstRequest);
+    expect(screen.queryByRole("button", { name: "Try Again" })).not.toBeInTheDocument();
+    expect(screen.getAllByTitle("Reroll this meal")).toHaveLength(4);
+  });
+
+  it("clears Meal Reroll retry state when the application session is refreshed", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    edgeFunctionInvoke.mockResolvedValue({
+      data: null,
+      error: { message: "A different meal was not created. Your original meal is unchanged." },
+    });
+    const user = userEvent.setup();
+    const firstSession = render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getAllByTitle("Reroll this meal")[0]);
+    expect(await screen.findByRole("button", { name: "Try Again" })).toBeInTheDocument();
+
+    firstSession.unmount();
+    render(<App />);
+
+    expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try Again" })).not.toBeInTheDocument();
   });
 
   it("labels Empty and Partial Meal Review actions explicitly", async () => {

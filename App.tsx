@@ -28,6 +28,11 @@ const App: React.FC = () => {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [rerollingState, setRerollingState] = useState<{ dayIndex: number, mealType: string } | null>(null);
+  const [rerollRetry, setRerollRetry] = useState<{
+    dayIndex: number;
+    mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+    currentMeal: Meal;
+  } | null>(null);
   const [nextWeekRetry, setNextWeekRetry] = useState<{
     feedback: MealFeedback[];
     currentPlan: MealPlan;
@@ -70,6 +75,7 @@ const App: React.FC = () => {
         setMealPlan(null);
         setMilestones([]);
         setNextWeekRetry(null);
+        setRerollRetry(null);
       }
     };
 
@@ -145,6 +151,7 @@ const App: React.FC = () => {
       setMealPlan(null);
       setMilestones([]);
       setNextWeekRetry(null);
+      setRerollRetry(null);
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
       setError('Could not log out. Please try again.');
@@ -226,10 +233,15 @@ const App: React.FC = () => {
   const handleRerollMeal = async (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => {
     if (!user || !profile || !mealPlan) return;
 
+    const retryRequest = rerollRetry?.dayIndex === dayIndex && rerollRetry.mealType === mealType
+      ? rerollRetry
+      : null;
+    const currentMeal = retryRequest?.currentMeal ?? mealPlan.days[dayIndex][mealType];
     setRerollingState({ dayIndex, mealType });
+    setError(null);
 
     try {
-      const newMeal = await regenerateSingleMeal(profile, mealType);
+      const newMeal = await regenerateSingleMeal(profile, mealType, currentMeal);
 
       const updatedDays = [...mealPlan.days];
       const targetDay = { ...updatedDays[dayIndex] };
@@ -250,11 +262,13 @@ const App: React.FC = () => {
       updatedDays[dayIndex] = targetDay;
       const updatedPlan = { ...mealPlan, days: updatedDays };
 
-      setMealPlan(updatedPlan);
       await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+      setMealPlan(updatedPlan);
+      setRerollRetry(null);
 
     } catch (err) {
       console.error(err);
+      setRerollRetry({ dayIndex, mealType, currentMeal });
       setError(errorMessage(err, 'Failed to regenerate the meal. Please try again.'));
     } finally {
       setRerollingState(null);
@@ -304,6 +318,7 @@ const App: React.FC = () => {
       setMilestones([]);
       setError(null);
       setNextWeekRetry(null);
+      setRerollRetry(null);
     } catch (clearError) {
       console.error('Failed to reset user data:', clearError);
       setError('Could not reset your data. Please try again.');
@@ -413,6 +428,7 @@ const App: React.FC = () => {
                 plan={mealPlan}
                 onReroll={handleRerollMeal}
                 rerollingState={rerollingState}
+                rerollRetry={rerollRetry}
                 onToggleIngredient={handleToggleIngredient}
               />
             ) : currentView === 'performance' ? (
