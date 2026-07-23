@@ -38,8 +38,16 @@ async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
 export const generateMealPlan = async (
   profile: UserProfile,
   feedback?: MealFeedback[],
+  currentPlan?: MealPlan,
+  reviewType?: "empty" | "partial",
 ): Promise<MealPlan> => {
-  const plan = await invokeAI<MealPlan>({ action: "plan", profile, feedback });
+  const plan = await invokeAI<MealPlan>({
+    action: "plan",
+    profile,
+    feedback,
+    currentPlan,
+    reviewType,
+  });
 
   if (!Array.isArray(plan.days) || plan.days.length !== 7) {
     throw new Error("The AI returned an incomplete weekly plan. Please try again.");

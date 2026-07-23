@@ -105,4 +105,100 @@ describe("application generation flow", () => {
       [],
     );
   });
+
+  it("labels Empty and Partial Meal Review actions explicitly", async () => {
+    getUserData.mockResolvedValue({
+      profile: {
+        age: 30,
+        gender: "Male",
+        heightCm: 175,
+        weightKg: 75,
+        activityLevel: "Moderately Active",
+        goal: "Lose Weight",
+        dietType: "Mediterranean",
+      },
+      mealPlan: weeklyPlanFixture,
+      milestones: [],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Next Week" }));
+
+    expect(screen.getByRole("button", { name: "Continue Without Review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Generate Next Plan" })).toBeInTheDocument();
+  });
+
+  it("preserves the current plan and reuses the Empty Meal Review request through Try Again", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    const nextPlan = structuredClone(weeklyPlanFixture);
+    nextPlan.days[0].breakfast.name = "Next Week Breakfast";
+    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    edgeFunctionInvoke
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "A valid Next Weekly Plan was not created. Your current plan is unchanged." },
+      })
+      .mockResolvedValueOnce({ data: { data: nextPlan }, error: null });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Next Week" }));
+    await user.click(screen.getByRole("button", { name: "Continue Without Review" }));
+
+    expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
+    const tryAgain = screen.getByRole("button", { name: "Try Again" });
+    const firstRequest = edgeFunctionInvoke.mock.calls[0][1];
+    expect(firstRequest.body).toEqual(expect.objectContaining({
+      action: "plan",
+      feedback: [],
+      reviewType: "empty",
+      currentPlan: weeklyPlanFixture,
+    }));
+    expect(saveUserData).not.toHaveBeenCalled();
+
+    await user.click(tryAgain);
+
+    expect(await screen.findByText("Next Week Breakfast")).toBeInTheDocument();
+    expect(edgeFunctionInvoke.mock.calls[1][1]).toEqual(firstRequest);
+    expect(screen.getByRole("button", { name: "Next Week" })).toBeInTheDocument();
+    expect(saveUserData).toHaveBeenCalledWith("user-1", profile, nextPlan, []);
+  });
+
+  it("clears terminal retry state when the application session is refreshed", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    edgeFunctionInvoke.mockResolvedValue({
+      data: null,
+      error: { message: "A valid Next Weekly Plan was not created. Your current plan is unchanged." },
+    });
+    const user = userEvent.setup();
+    const firstSession = render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Next Week" }));
+    await user.click(screen.getByRole("button", { name: "Continue Without Review" }));
+    expect(await screen.findByRole("button", { name: "Try Again" })).toBeInTheDocument();
+
+    firstSession.unmount();
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Next Week" })).toBeInTheDocument();
+    expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
+  });
 });

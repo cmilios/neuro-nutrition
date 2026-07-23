@@ -12,6 +12,7 @@ interface LayoutProps {
   hasProfile: boolean;
   currentView?: 'plan' | 'performance';
   onViewChange?: (view: 'plan' | 'performance') => void;
+  canRetryNextWeek?: boolean;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -23,7 +24,8 @@ const Layout: React.FC<LayoutProps> = ({
   userProfile,
   hasProfile,
   currentView = 'plan',
-  onViewChange
+  onViewChange,
+  canRetryNextWeek = false,
 }) => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
@@ -83,10 +85,12 @@ const Layout: React.FC<LayoutProps> = ({
                  <button 
                   onClick={onNextWeek}
                   className="text-sm font-bold text-slate-900 bg-emerald-100 hover:bg-emerald-200 px-3 py-1.5 rounded-lg flex items-center gap-2 transition-colors border border-emerald-200/50"
-                  title="Generate plan for next week"
+                  title={canRetryNextWeek ? "Retry the failed Next Weekly Plan" : "Generate plan for next week"}
                  >
                    <CalendarPlus size={16} className="text-emerald-700" />
-                   <span className="hidden sm:inline text-emerald-800">Next Week</span>
+                   <span className="hidden sm:inline text-emerald-800">
+                     {canRetryNextWeek ? "Try Again" : "Next Week"}
+                   </span>
                  </button>
 
                  <button 

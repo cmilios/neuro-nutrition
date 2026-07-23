@@ -144,14 +144,14 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
              onClick={() => onSubmit([])} // Empty array means skip logic
              className="text-slate-500 hover:text-slate-700 text-sm font-medium px-4"
           >
-            Skip Review (Random Plan)
+            Continue Without Review
           </button>
           
           <button
             onClick={() => onSubmit(feedback)}
             className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
           >
-            Generate Optimized Plan
+            Generate Next Plan
             <ArrowRight size={18} />
           </button>
         </div>

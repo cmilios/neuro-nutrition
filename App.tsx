@@ -28,6 +28,11 @@ const App: React.FC = () => {
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [rerollingState, setRerollingState] = useState<{ dayIndex: number, mealType: string } | null>(null);
+  const [nextWeekRetry, setNextWeekRetry] = useState<{
+    feedback: MealFeedback[];
+    currentPlan: MealPlan;
+    reviewType: 'empty' | 'partial';
+  } | null>(null);
 
   // Navigation State
   const [currentView, setCurrentView] = useState<'plan' | 'performance'>('plan');
@@ -64,6 +69,7 @@ const App: React.FC = () => {
         setProfile(null);
         setMealPlan(null);
         setMilestones([]);
+        setNextWeekRetry(null);
       }
     };
 
@@ -138,6 +144,7 @@ const App: React.FC = () => {
       setProfile(null);
       setMealPlan(null);
       setMilestones([]);
+      setNextWeekRetry(null);
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
       setError('Could not log out. Please try again.');
@@ -296,6 +303,7 @@ const App: React.FC = () => {
       setMealPlan(null);
       setMilestones([]);
       setError(null);
+      setNextWeekRetry(null);
     } catch (clearError) {
       console.error('Failed to reset user data:', clearError);
       setError('Could not reset your data. Please try again.');
@@ -303,7 +311,44 @@ const App: React.FC = () => {
   };
 
   // Triggered by the "Next Week" button in Layout
+  const runNextWeekGeneration = async (request: {
+    feedback: MealFeedback[];
+    currentPlan: MealPlan;
+    reviewType: 'empty' | 'partial';
+  }) => {
+    if (!user || !profile) return;
+
+    setIsReviewModalOpen(false);
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const generatedPlan = await generateMealPlan(
+        profile,
+        request.feedback,
+        request.currentPlan,
+        request.reviewType,
+      );
+      await storageService.saveUserData(user.id, profile, generatedPlan, milestones);
+      setMealPlan(generatedPlan);
+      setNextWeekRetry(null);
+    } catch (err) {
+      console.error('Failed to generate optimized plan:', err);
+      setNextWeekRetry(request);
+      setError(errorMessage(
+        err,
+        'A valid Next Weekly Plan was not created. Your current plan is unchanged.',
+      ));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleNextWeekRequest = () => {
+    if (nextWeekRetry) {
+      void runNextWeekGeneration(nextWeekRetry);
+      return;
+    }
     if (mealPlan) {
       setIsReviewModalOpen(true);
     } else {
@@ -312,24 +357,13 @@ const App: React.FC = () => {
   };
 
   // Called when the Review Modal is submitted
-  const handleReviewSubmit = async (feedback: MealFeedback[]) => {
-    if (!user || !profile) return;
-
-    setIsReviewModalOpen(false);
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // Pass feedback to the generator
-      const generatedPlan = await generateMealPlan(profile, feedback);
-      setMealPlan(generatedPlan);
-      await storageService.saveUserData(user.id, profile, generatedPlan, milestones);
-    } catch (err) {
-      console.error('Failed to generate optimized plan:', err);
-      setError(errorMessage(err, 'Failed to generate an optimized plan. Please try again.'));
-    } finally {
-      setIsLoading(false);
-    }
+  const handleReviewSubmit = (feedback: MealFeedback[]) => {
+    if (!mealPlan) return;
+    void runNextWeekGeneration({
+      feedback,
+      currentPlan: mealPlan,
+      reviewType: feedback.length === 0 ? 'empty' : 'partial',
+    });
   };
 
   if (isAuthChecking || isDataLoading) {
@@ -348,6 +382,7 @@ const App: React.FC = () => {
       onNextWeek={handleNextWeekRequest}
       onLogout={handleLogout}
       hasProfile={!!mealPlan}
+      canRetryNextWeek={!!nextWeekRetry}
       currentView={currentView}
       onViewChange={setCurrentView}
     >

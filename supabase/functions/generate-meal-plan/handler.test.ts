@@ -5,6 +5,7 @@ import {
   ProviderGenerationError,
 } from "./handler";
 import { createOpenAIUsageRecord } from "./usage";
+import { weeklyPlanFixture } from "../../../test/weeklyPlanFixture";
 
 const profile = {
   age: 30,
@@ -315,6 +316,171 @@ describe("generate-meal-plan HTTP contract", () => {
         action: "plan",
       }),
     );
+    errorSpy.mockRestore();
+  });
+
+  it("repairs one invalid Empty Meal Review result and records both attempts", async () => {
+    const invalidPlan = structuredClone(weeklyPlanFixture);
+    const repairedPlan = structuredClone(weeklyPlanFixture);
+    repairedPlan.days.forEach((day, dayIndex) => {
+      for (const type of ["breakfast", "lunch", "dinner", "snack"] as const) {
+        day[type] = {
+          ...day[type],
+          name: `New ${day[type].name}`,
+          ingredients: [`new ingredient ${dayIndex} ${type}`],
+          instructions: [`new preparation ${dayIndex} ${type}`],
+        };
+      }
+    });
+    const generate = vi.fn()
+      .mockResolvedValueOnce({
+        data: invalidPlan,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000201",
+          attempt: 1,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      })
+      .mockResolvedValueOnce({
+        data: repairedPlan,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000202",
+          attempt: 2,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      });
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-5" }),
+      generate,
+      persist,
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback: [],
+        reviewType: "empty",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.days).toHaveLength(7);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      attempt: 2,
+      validationDetails: expect.arrayContaining(["too_many_same_meals"]),
+    }));
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      attempt: 1,
+      outcome: "failure",
+      validationCodes: expect.arrayContaining(["too_many_same_meals"]),
+    }));
+    expect(persist).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      attempt: 2,
+      outcome: "success",
+    }));
+  });
+
+  it("returns a terminal validation error after exactly two invalid attempts", async () => {
+    const generate = vi.fn()
+      .mockImplementation(({ attempt }) => Promise.resolve({
+        data: weeklyPlanFixture,
+        usageRecord: createOpenAIUsageRecord({
+          callId: `00000000-0000-4000-8000-00000000020${attempt}`,
+          attempt,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      }));
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-6" }),
+      generate,
+      persist,
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback: [],
+        reviewType: "empty",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "invalid_next_weekly_plan",
+        message: "A valid Next Weekly Plan was not created. Your current plan is unchanged.",
+      },
+    });
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not suppress the validation retry when usage persistence is unavailable", async () => {
+    const repairedPlan = structuredClone(weeklyPlanFixture);
+    repairedPlan.days.forEach((day, dayIndex) => {
+      for (const type of ["breakfast", "lunch", "dinner", "snack"] as const) {
+        day[type] = {
+          ...day[type],
+          ingredients: [`replacement ${dayIndex} ${type}`],
+          instructions: [`prepare replacement ${dayIndex} ${type}`],
+        };
+      }
+    });
+    const generate = vi.fn()
+      .mockResolvedValueOnce({
+        data: weeklyPlanFixture,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000211",
+          attempt: 1,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      })
+      .mockResolvedValueOnce({
+        data: repairedPlan,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000212",
+          attempt: 2,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-7" }),
+      generate,
+      persist: vi.fn().mockRejectedValue(new Error("ledger unavailable")),
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback: [],
+        reviewType: "empty",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(generate).toHaveBeenCalledTimes(2);
     errorSpy.mockRestore();
   });
 });

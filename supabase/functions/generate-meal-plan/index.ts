@@ -228,6 +228,41 @@ function buildPlanPrompt(profile: Profile, feedback?: Feedback[]): string {
   `;
 }
 
+function buildNextWeeklyPlanPrompt(request: GenerationRequest, profile: Profile): string {
+  const currentPlan = JSON.stringify(request.currentPlan);
+  const repair = request.validationDetails?.length
+    ? `The previous result failed these rules: ${request.validationDetails.join(", ")}. Repair every listed rule.`
+    : "";
+
+  return `
+    Act as a world-class nutritionist.
+    Create the Next Weekly Plan after an explicitly Empty Meal Review.
+    The complete immediately preceding Weekly Plan is:
+    ${currentPlan}
+
+    Intentionally retain between zero and seven Same Meals only when doing so improves
+    nutritional balance and weekly variety. Do not choose retained meals randomly.
+    A retained Same Meal must be an exact recipe copy, keep its meal type, and move to a
+    different day. Change at least twenty-one meals. A renamed meal with the same
+    normalized ingredients and preparation is still the Same Meal.
+    Return exactly seven days with breakfast, lunch, dinner, and snack, and
+    recalculate each daily macro summary from those four meals.
+
+    Continue to respect this profile:
+    - Age: ${profile.age}
+    - Gender: ${profile.gender}
+    - Height: ${profile.heightCm} cm
+    - Current Weight: ${profile.weightKg} kg
+    - Target Weight: ${profile.targetWeightKg ? profile.targetWeightKg + " kg" : "Not specified"}
+    - Activity Level: ${profile.activityLevel}
+    - Goal: ${profile.goal}
+    - Diet Preference: ${profile.dietType}
+    - Allergies/Restrictions: ${profile.allergies || "None"}
+
+    ${repair}
+  `;
+}
+
 function buildMealPrompt(profile: Profile, mealType: string): string {
   return `
     Act as a world-class nutritionist.
@@ -250,6 +285,7 @@ async function callOpenAI(
   schemaName: string,
   schema: unknown,
   maxTokens: number,
+  attempt = 1,
 ): Promise<GenerationResult> {
   const callId = crypto.randomUUID();
   let res: Response;
@@ -289,7 +325,7 @@ async function callOpenAI(
       code,
       createOpenAIUsageRecord({
         callId,
-        attempt: 1,
+        attempt,
         configuredModel: model,
         outcome: "failure",
         errorCode: code,
@@ -361,7 +397,7 @@ async function callOpenAI(
       httpError.code,
       createOpenAIUsageRecord({
         callId,
-        attempt: 1,
+        attempt,
         configuredModel: model,
         providerRequestId: requestId,
         response: errorBody,
@@ -385,7 +421,7 @@ async function callOpenAI(
       "ai_invalid_response",
       createOpenAIUsageRecord({
         callId,
-        attempt: 1,
+        attempt,
         configuredModel: model,
         providerRequestId: requestId,
         outcome: "failure",
@@ -400,7 +436,7 @@ async function callOpenAI(
       code,
       createOpenAIUsageRecord({
         callId,
-        attempt: 1,
+        attempt,
         configuredModel: model,
         providerRequestId: requestId,
         response: responseBody,
@@ -440,7 +476,7 @@ async function callOpenAI(
       data: JSON.parse(textBlock.text),
       usageRecord: createOpenAIUsageRecord({
         callId,
-        attempt: 1,
+        attempt,
         configuredModel: model,
         providerRequestId: requestId,
         response: responseBody,
@@ -465,7 +501,7 @@ async function generate(request: GenerationRequest): Promise<GenerationResult> {
     }
     const model = Deno.env.get("OPENAI_MODEL") || DEFAULT_MODEL;
 
-    const { action, profile, feedback, mealType } = request;
+    const { action, profile, feedback, mealType, attempt = 1 } = request;
     assertValidProfile(profile);
 
     if (action === "meal") {
@@ -479,16 +515,20 @@ async function generate(request: GenerationRequest): Promise<GenerationResult> {
         "meal",
         mealSchema,
         4000,
+        attempt,
       );
     }
 
     return callOpenAI(
       apiKey,
       model,
-      buildPlanPrompt(profile, feedback as Feedback[] | undefined),
+      request.reviewType === "empty"
+        ? buildNextWeeklyPlanPrompt(request, profile)
+        : buildPlanPrompt(profile, feedback as Feedback[] | undefined),
       "meal_plan",
       mealPlanSchema,
       16000,
+      attempt,
     );
 }
 

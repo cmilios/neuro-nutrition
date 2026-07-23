@@ -1,3 +1,9 @@
+import {
+  NextWeeklyPlanValidationError,
+  validateNextWeeklyPlan,
+  type WeeklyPlan,
+} from "./nextWeeklyPlan.ts";
+
 export interface GenerationUser {
   id: string;
 }
@@ -7,6 +13,10 @@ export interface GenerationRequest {
   profile: Record<string, unknown>;
   feedback?: unknown[];
   mealType?: string;
+  currentPlan?: WeeklyPlan;
+  reviewType?: "empty" | "partial";
+  attempt?: number;
+  validationDetails?: string[];
 }
 
 export interface ProviderUsageRecord {
@@ -96,6 +106,15 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
   if (body.feedback !== undefined && (!Array.isArray(body.feedback) || body.feedback.length > 28)) {
     throw new HttpError("Invalid meal feedback.", 400, "invalid_feedback");
   }
+  if (body.reviewType !== undefined && body.reviewType !== "empty" && body.reviewType !== "partial") {
+    throw new HttpError("Invalid Meal Review type.", 400, "invalid_review_type");
+  }
+  if (
+    body.reviewType === "empty" &&
+    (!body.currentPlan || typeof body.currentPlan !== "object" || Array.isArray(body.currentPlan))
+  ) {
+    throw new HttpError("The current Weekly Plan is required.", 400, "missing_current_plan");
+  }
   if (body.action === "meal" && (typeof body.mealType !== "string" || !allowedMealTypes.has(body.mealType))) {
     throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
   }
@@ -113,6 +132,24 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
     action: request.action,
     ...usageRecord,
   });
+  const persistAndReport = async (
+    user: GenerationUser,
+    request: GenerationRequest,
+    usageRecord: ProviderUsageRecord,
+  ) => {
+    try {
+      await persist(user, request, usageRecord);
+    } catch {
+      console.error("Failed to persist AI Usage Record after retries", {
+        userId: user.id,
+        action: request.action,
+        callId: usageRecord.callId,
+        attempt: usageRecord.attempt,
+        providerRequestId: usageRecord.providerRequestId,
+        providerResponseId: usageRecord.providerResponseId,
+      });
+    }
+  };
 
   return async (request: Request): Promise<Response> => {
     if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -142,20 +179,54 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         throw new HttpError("Request body must be valid JSON.", 400, "invalid_json");
       }
 
-      const result = await dependencies.generate(generationRequest);
-      try {
-        await persist(user, generationRequest, result.usageRecord);
-      } catch {
-        console.error("Failed to persist AI Usage Record after retries", {
-          userId: user.id,
-          action: generationRequest.action,
-          callId: result.usageRecord.callId,
-          attempt: result.usageRecord.attempt,
-          providerRequestId: result.usageRecord.providerRequestId,
-          providerResponseId: result.usageRecord.providerResponseId,
-        });
+      const isEmptyMealReview =
+        generationRequest.action === "plan" &&
+        generationRequest.reviewType === "empty" &&
+        generationRequest.currentPlan;
+      let validationDetails: string[] | undefined;
+
+      for (let attempt = 1; attempt <= (isEmptyMealReview ? 2 : 1); attempt += 1) {
+        const attemptRequest = { ...generationRequest, attempt, validationDetails };
+        const result = await dependencies.generate(attemptRequest);
+
+        if (isEmptyMealReview) {
+          try {
+            const assembledPlan = validateNextWeeklyPlan(
+              generationRequest.currentPlan!,
+              result.data,
+            );
+            await persistAndReport(user, generationRequest, result.usageRecord);
+            return json({ data: assembledPlan });
+          } catch (error) {
+            if (!(error instanceof NextWeeklyPlanValidationError)) throw error;
+            validationDetails = error.codes;
+            const failedUsage = {
+              ...result.usageRecord,
+              outcome: "failure" as const,
+              validationCodes: error.codes,
+              errorCode: "invalid_next_weekly_plan",
+            };
+            await persistAndReport(user, generationRequest, failedUsage);
+            console.error("Next Weekly Plan validation failed", {
+              userId: user.id,
+              attempt,
+              failedRules: error.codes,
+              timestamp: new Date().toISOString(),
+              providerRequestId: result.usageRecord.providerRequestId,
+              providerResponseId: result.usageRecord.providerResponseId,
+            });
+          }
+        } else {
+          await persistAndReport(user, generationRequest, result.usageRecord);
+          return json({ data: result.data });
+        }
       }
-      return json({ data: result.data });
+
+      throw new HttpError(
+        "A valid Next Weekly Plan was not created. Your current plan is unchanged.",
+        422,
+        "invalid_next_weekly_plan",
+      );
     } catch (error) {
       if (error instanceof ProviderGenerationError && user && generationRequest) {
         try {
