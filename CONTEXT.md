@@ -8,6 +8,10 @@ NeuroNutrition creates personalized meal plans and uses a completed week's exper
 A seven-day set of breakfast, lunch, dinner, and snack meals tailored to the user's profile.
 _Avoid_: Menu, schedule
 
+**Current Weekly Plan**:
+The authoritative Weekly Plan presently served to an authenticated user across sessions and devices. A device may temporarily display an older copy, but creating a Next Weekly Plan replaces the authoritative plan, and a Meal Reroll updates the selected Meal Slot in that plan.
+_Avoid_: Active menu, local plan
+
 **Meal Review**:
 The user's record of which meals from the current Weekly Plan were cooked and liked.
 _Avoid_: Review form, survey
