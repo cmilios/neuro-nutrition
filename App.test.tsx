@@ -127,6 +127,77 @@ describe("application generation flow", () => {
 
     expect(screen.getByRole("button", { name: "Continue Without Review" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate Next Plan" })).toBeInTheDocument();
+    expect(screen.getByText(/untouched meals.*uncooked meals.*replaced/i)).toBeInTheDocument();
+  });
+
+  it("keeps an untouched Generate Next Plan submission as an Empty Meal Review", async () => {
+    getUserData.mockResolvedValue({
+      profile: {
+        age: 30,
+        gender: "Male",
+        heightCm: 175,
+        weightKg: 75,
+        activityLevel: "Moderately Active",
+        goal: "Lose Weight",
+        dietType: "Mediterranean",
+      },
+      mealPlan: weeklyPlanFixture,
+      milestones: [],
+    });
+    edgeFunctionInvoke.mockResolvedValue({ data: { data: weeklyPlanFixture }, error: null });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Next Week" }));
+    await user.click(screen.getByRole("button", { name: "Generate Next Plan" }));
+
+    expect(edgeFunctionInvoke.mock.calls[0][1].body).toEqual(expect.objectContaining({
+      feedback: [],
+      reviewType: "empty",
+    }));
+  });
+
+  it("normalizes untouched Meal Slots when submitting a Partial Meal Review", async () => {
+    getUserData.mockResolvedValue({
+      profile: {
+        age: 30,
+        gender: "Male",
+        heightCm: 175,
+        weightKg: 75,
+        activityLevel: "Moderately Active",
+        goal: "Lose Weight",
+        dietType: "Mediterranean",
+      },
+      mealPlan: weeklyPlanFixture,
+      milestones: [],
+    });
+    const convergedPlan = structuredClone(weeklyPlanFixture);
+    convergedPlan.days[0].breakfast.name = "Converged Partial Breakfast";
+    edgeFunctionInvoke.mockResolvedValue({ data: { data: convergedPlan }, error: null });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "Next Week" }));
+    await user.click(screen.getAllByRole("button", { name: "Cooked" })[0]);
+    await user.click(screen.getByRole("button", { name: "Generate Next Plan" }));
+
+    expect(await screen.findByText("Converged Partial Breakfast")).toBeInTheDocument();
+    const request = edgeFunctionInvoke.mock.calls[0][1].body;
+    expect(request.reviewType).toBe("partial");
+    expect(request.feedback).toHaveLength(28);
+    expect(request.feedback[0]).toEqual(expect.objectContaining({
+      cooked: true,
+      liked: false,
+    }));
+    expect(request.feedback.slice(1)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cooked: false, liked: false }),
+    ]));
+    expect(saveUserData).toHaveBeenCalledWith(
+      "user-1",
+      expect.any(Object),
+      convergedPlan,
+      [],
+    );
   });
 
   it("preserves the current plan and reuses the Empty Meal Review request through Try Again", async () => {

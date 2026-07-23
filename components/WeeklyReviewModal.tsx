@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { MealPlan, MealFeedback } from '../types';
 import { ThumbsUp, Check, ArrowRight, X } from 'lucide-react';
 
+const mealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'] as const;
+
 interface WeeklyReviewModalProps {
   currentPlan: MealPlan;
   isOpen: boolean;
@@ -63,6 +65,15 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
     setFeedback(newFeedbackList);
   };
 
+  const completeMealReviewFeedback = () =>
+    feedback.length === 0 ? [] :
+    currentPlan.days.flatMap((day) =>
+      mealTypes.map((type) => {
+        const meal = day[type.toLowerCase() as 'breakfast' | 'lunch' | 'dinner' | 'snack'];
+        return getFeedback(day.day, type, meal.name);
+      })
+    );
+
   if (!isOpen) return null;
 
   return (
@@ -84,6 +95,9 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
         </div>
 
         <div className="overflow-y-auto p-6 custom-scrollbar">
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            If you review any meal, untouched meals become Uncooked Meals and are replaced in your Next Weekly Plan.
+          </div>
           {currentPlan.days.map((day, dayIdx) => (
             <div key={dayIdx} className="mb-8 last:mb-0">
               <h3 className="font-bold text-emerald-700 bg-emerald-50 px-4 py-2 rounded-lg inline-block mb-4 text-sm uppercase tracking-wide">
@@ -91,7 +105,7 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((type) => {
+                {mealTypes.map((type) => {
                   const meal = day[type.toLowerCase() as keyof typeof day];
                   if (!meal || typeof meal !== 'object' || !('name' in meal)) return null;
                   const item = meal as any; // safe cast due to loop
@@ -148,7 +162,7 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
           </button>
           
           <button
-            onClick={() => onSubmit(feedback)}
+            onClick={() => onSubmit(completeMealReviewFeedback())}
             className="bg-slate-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg hover:shadow-xl hover:-translate-y-0.5"
           >
             Generate Next Plan

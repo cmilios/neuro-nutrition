@@ -2,6 +2,7 @@ import {
   NextWeeklyPlanValidationError,
   validateNextWeeklyPlan,
   type WeeklyPlan,
+  type MealReviewFeedback,
 } from "./nextWeeklyPlan.ts";
 
 export interface GenerationUser {
@@ -11,7 +12,7 @@ export interface GenerationUser {
 export interface GenerationRequest {
   action: "plan" | "meal";
   profile: Record<string, unknown>;
-  feedback?: unknown[];
+  feedback?: MealReviewFeedback[];
   mealType?: string;
   currentPlan?: WeeklyPlan;
   reviewType?: "empty" | "partial";
@@ -110,10 +111,62 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
     throw new HttpError("Invalid Meal Review type.", 400, "invalid_review_type");
   }
   if (
-    body.reviewType === "empty" &&
+    body.reviewType === "partial" &&
+    (
+      !Array.isArray(body.feedback) ||
+      body.feedback.length !== 28 ||
+      body.feedback.some((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return true;
+        const feedback = item as Record<string, unknown>;
+        return typeof feedback.day !== "string" ||
+          typeof feedback.type !== "string" ||
+          typeof feedback.name !== "string" ||
+          typeof feedback.cooked !== "boolean" ||
+          typeof feedback.liked !== "boolean" ||
+          (feedback.liked && !feedback.cooked);
+      })
+    )
+  ) {
+    throw new HttpError("Invalid Partial Meal Review.", 400, "invalid_feedback");
+  }
+  if (
+    (body.reviewType === "empty" || body.reviewType === "partial") &&
     (!body.currentPlan || typeof body.currentPlan !== "object" || Array.isArray(body.currentPlan))
   ) {
     throw new HttpError("The current Weekly Plan is required.", 400, "missing_current_plan");
+  }
+  if (body.reviewType === "partial") {
+    const currentPlan = body.currentPlan as { days?: unknown[] };
+    const days = Array.isArray(currentPlan.days) ? currentPlan.days : [];
+    const expectedSlots = new Map<string, string>();
+    for (const value of days) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const day = value as Record<string, unknown>;
+      if (typeof day.day !== "string") continue;
+      for (const type of allowedMealTypes) {
+        const meal = day[type];
+        if (meal && typeof meal === "object" && !Array.isArray(meal)) {
+          const name = (meal as Record<string, unknown>).name;
+          if (typeof name === "string") expectedSlots.set(`${day.day}|${type}`, name);
+        }
+      }
+    }
+    const suppliedSlots = new Set<string>();
+    for (const value of body.feedback as MealReviewFeedback[]) {
+      const type = value.type.toLocaleLowerCase("en-US");
+      const key = `${value.day}|${type}`;
+      if (
+        !allowedMealTypes.has(type) ||
+        suppliedSlots.has(key) ||
+        expectedSlots.get(key) !== value.name
+      ) {
+        throw new HttpError("Invalid Partial Meal Review.", 400, "invalid_feedback");
+      }
+      suppliedSlots.add(key);
+    }
+    if (expectedSlots.size !== 28 || suppliedSlots.size !== expectedSlots.size) {
+      throw new HttpError("Invalid Partial Meal Review.", 400, "invalid_feedback");
+    }
   }
   if (body.action === "meal" && (typeof body.mealType !== "string" || !allowedMealTypes.has(body.mealType))) {
     throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
@@ -179,21 +232,23 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         throw new HttpError("Request body must be valid JSON.", 400, "invalid_json");
       }
 
-      const isEmptyMealReview =
+      const isNextWeeklyPlanReview =
         generationRequest.action === "plan" &&
-        generationRequest.reviewType === "empty" &&
+        (generationRequest.reviewType === "empty" || generationRequest.reviewType === "partial") &&
         generationRequest.currentPlan;
       let validationDetails: string[] | undefined;
 
-      for (let attempt = 1; attempt <= (isEmptyMealReview ? 2 : 1); attempt += 1) {
+      for (let attempt = 1; attempt <= (isNextWeeklyPlanReview ? 2 : 1); attempt += 1) {
         const attemptRequest = { ...generationRequest, attempt, validationDetails };
         const result = await dependencies.generate(attemptRequest);
 
-        if (isEmptyMealReview) {
+        if (isNextWeeklyPlanReview) {
           try {
             const assembledPlan = validateNextWeeklyPlan(
               generationRequest.currentPlan!,
               result.data,
+              generationRequest.feedback,
+              generationRequest.reviewType,
             );
             await persistAndReport(user, generationRequest, result.usageRecord);
             return json({ data: assembledPlan });

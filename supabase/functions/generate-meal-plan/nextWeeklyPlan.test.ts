@@ -40,6 +40,17 @@ const withCarryovers = (count: number) => {
   return candidate;
 };
 
+const feedback = (likedSlots: number[]) =>
+  currentPlan.days.flatMap((day, dayIndex) =>
+    mealTypes.map((type, typeIndex) => ({
+      day: day.day,
+      type,
+      name: day[type].name,
+      cooked: likedSlots.includes(dayIndex * mealTypes.length + typeIndex),
+      liked: likedSlots.includes(dayIndex * mealTypes.length + typeIndex),
+    }))
+  );
+
 describe("Next Weekly Plan validation", () => {
   it.each([0, 7])("accepts and assembles a plan with %i intentionally retained Same Meals", (count) => {
     const result = validateNextWeeklyPlan(currentPlan, withCarryovers(count));
@@ -105,5 +116,61 @@ describe("Next Weekly Plan validation", () => {
 
     expect(() => validateNextWeeklyPlan(currentPlan, candidate))
       .toThrow(NextWeeklyPlanValidationError);
+  });
+
+  it("retains exactly the Liked Meals and replaces Disliked and Uncooked Meals", () => {
+    const candidate = withCarryovers(0);
+    candidate.days[1].breakfast = structuredClone(currentPlan.days[0].breakfast);
+    candidate.days[2].lunch = structuredClone(currentPlan.days[1].lunch);
+
+    const result = validateNextWeeklyPlan(
+      currentPlan,
+      candidate,
+      feedback([0, 5]),
+      "partial",
+    );
+
+    expect(result.days[1].breakfast).toEqual(currentPlan.days[0].breakfast);
+    expect(result.days[2].lunch).toEqual(currentPlan.days[1].lunch);
+  });
+
+  it("rejects a Partial Meal Review result that drops a Liked Meal or retains an Uncooked Meal", () => {
+    const candidate = withCarryovers(0);
+    candidate.days[1].lunch = structuredClone(currentPlan.days[1].lunch);
+
+    expect(() => validateNextWeeklyPlan(
+      currentPlan,
+      candidate,
+      feedback([0]),
+      "partial",
+    )).toThrowError(expect.objectContaining({
+      codes: expect.arrayContaining([
+        "liked_meal_not_retained",
+        "reviewed_meal_not_replaced",
+      ]),
+    }));
+  });
+
+  it("accepts a Proven Weekly Plan successor with all exact recipes rotated by day", () => {
+    const candidate = withCarryovers(28);
+
+    const result = validateNextWeeklyPlan(
+      currentPlan,
+      candidate,
+      feedback(Array.from({ length: 28 }, (_, index) => index)),
+      "partial",
+    );
+
+    expect(result.days).toHaveLength(7);
+  });
+
+  it("rejects a successor whose daily calories are not balanced around the preceding plan", () => {
+    const candidate = withCarryovers(0);
+    candidate.days[0].breakfast.macros.calories = 5_000;
+
+    expect(() => validateNextWeeklyPlan(currentPlan, candidate))
+      .toThrowError(expect.objectContaining({
+        codes: expect.arrayContaining(["nutritionally_unbalanced"]),
+      }));
   });
 });

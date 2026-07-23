@@ -57,6 +57,7 @@ export interface Meal {
   macros: MacroNutrients;
   cookingTimeMinutes: number;
   prepTimeMinutes: number;
+  portions?: number | null;
   checkedIngredients?: string[];
 }
 

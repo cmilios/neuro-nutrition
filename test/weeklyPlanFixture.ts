@@ -8,6 +8,7 @@ const meal = (name: string): Meal => ({
   macros: { calories: 400, protein: 30, carbs: 40, fats: 12 },
   cookingTimeMinutes: 20,
   prepTimeMinutes: 10,
+  portions: 1,
 });
 
 const day = (name: string, index: number): DayPlan => ({

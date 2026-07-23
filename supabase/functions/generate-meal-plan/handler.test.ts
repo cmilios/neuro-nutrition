@@ -17,6 +17,40 @@ const profile = {
   dietType: "Mediterranean",
 };
 
+const mealTypes = ["breakfast", "lunch", "dinner", "snack"] as const;
+
+const partialFeedback = (likedSlots: number[]) =>
+  weeklyPlanFixture.days.flatMap((day, dayIndex) =>
+    mealTypes.map((type, typeIndex) => ({
+      day: day.day,
+      type,
+      name: day[type].name,
+      cooked: likedSlots.includes(dayIndex * mealTypes.length + typeIndex),
+      liked: likedSlots.includes(dayIndex * mealTypes.length + typeIndex),
+    }))
+  );
+
+const partialSuccessor = (likedSlots: number[]) => {
+  const candidate = structuredClone(weeklyPlanFixture);
+  candidate.days.forEach((day, dayIndex) => {
+    for (const type of mealTypes) {
+      day[type] = {
+        ...day[type],
+        name: `Replacement ${dayIndex} ${type}`,
+        ingredients: [`replacement ingredient ${dayIndex} ${type}`],
+        instructions: [`replacement preparation ${dayIndex} ${type}`],
+      };
+    }
+  });
+  for (const slot of likedSlots) {
+    const type = mealTypes[slot % mealTypes.length];
+    const oldDay = Math.floor(slot / mealTypes.length);
+    candidate.days[(oldDay + 1) % 7][type] =
+      structuredClone(weeklyPlanFixture.days[oldDay][type]);
+  }
+  return candidate;
+};
+
 describe("generate-meal-plan HTTP contract", () => {
   it("returns a generated Weekly Plan through controlled boundaries", async () => {
     const weeklyPlan = { weeklySummary: "Balanced week", days: [] };
@@ -482,5 +516,126 @@ describe("generate-meal-plan HTTP contract", () => {
     expect(response.status).toBe(200);
     expect(generate).toHaveBeenCalledTimes(2);
     errorSpy.mockRestore();
+  });
+
+  it("repairs mixed Partial Meal Review results and preserves exact Liked Meals", async () => {
+    const likedSlots = [0, 5, 10, 15];
+    const repairedPlan = partialSuccessor(likedSlots);
+    const generate = vi.fn()
+      .mockResolvedValueOnce({
+        data: weeklyPlanFixture,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000301",
+          attempt: 1,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      })
+      .mockResolvedValueOnce({
+        data: repairedPlan,
+        usageRecord: createOpenAIUsageRecord({
+          callId: "00000000-0000-4000-8000-000000000302",
+          attempt: 2,
+          configuredModel: "gpt-5.6-sol",
+          outcome: "success",
+        }),
+      });
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-8" }),
+      generate,
+      persist,
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback: partialFeedback(likedSlots),
+        reviewType: "partial",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    for (const slot of likedSlots) {
+      const type = mealTypes[slot % mealTypes.length];
+      const oldDay = Math.floor(slot / mealTypes.length);
+      expect(body.data.days[(oldDay + 1) % 7][type])
+        .toEqual(weeklyPlanFixture.days[oldDay][type]);
+    }
+    expect(body.data.days[0].lunch.ingredients[0]).toMatch(/^replacement ingredient/);
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      validationDetails: expect.arrayContaining(["reviewed_meal_not_replaced"]),
+    }));
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts a Proven Weekly Plan successor with all twenty-eight exact meals rotated", async () => {
+    const likedSlots = Array.from({ length: 28 }, (_, index) => index);
+    const provenSuccessor = partialSuccessor(likedSlots);
+    const generate = vi.fn().mockResolvedValue({
+      data: provenSuccessor,
+      usageRecord: createOpenAIUsageRecord({
+        callId: "00000000-0000-4000-8000-000000000303",
+        attempt: 1,
+        configuredModel: "gpt-5.6-sol",
+        outcome: "success",
+      }),
+    });
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-9" }),
+      generate,
+      persist: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback: partialFeedback(likedSlots),
+        reviewType: "partial",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.days).toHaveLength(7);
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects non-canonical or incomplete Partial Meal Review slots before generation", async () => {
+    const generate = vi.fn();
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-10" }),
+      generate,
+      persist: vi.fn(),
+    });
+    const feedback = partialFeedback([0]);
+    feedback[1] = { ...feedback[0] };
+
+    const response = await handler(new Request("http://localhost/generate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "plan",
+        profile,
+        feedback,
+        reviewType: "partial",
+        currentPlan: weeklyPlanFixture,
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "invalid_feedback", message: "Invalid Partial Meal Review." },
+    });
+    expect(generate).not.toHaveBeenCalled();
   });
 });

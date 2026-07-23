@@ -57,6 +57,10 @@ const mealSchema = {
     macros: macroSchema,
     cookingTimeMinutes: { type: "number" },
     prepTimeMinutes: { type: "number" },
+    portions: {
+      type: ["number", "null"],
+      description: "Number of servings produced by this recipe.",
+    },
   },
   required: [
     "name",
@@ -66,6 +70,7 @@ const mealSchema = {
     "macros",
     "cookingTimeMinutes",
     "prepTimeMinutes",
+    "portions",
   ],
 };
 
@@ -230,23 +235,42 @@ function buildPlanPrompt(profile: Profile, feedback?: Feedback[]): string {
 
 function buildNextWeeklyPlanPrompt(request: GenerationRequest, profile: Profile): string {
   const currentPlan = JSON.stringify(request.currentPlan);
+  const review = request.reviewType === "partial"
+    ? `
+    This is a Partial Meal Review. Its normalized outcomes for all twenty-eight
+    Meal Slots are:
+    ${JSON.stringify(request.feedback)}
+
+    Retain every Liked Meal as an exact recipe copy, including its ingredients,
+    preparation, portions, and macros. Keep its meal type and move it to a
+    different day. Replace every Disliked and Uncooked Meal with a meal that is
+    not the Same Meal. If all twenty-eight meals are liked, create a Proven
+    Weekly Plan successor by retaining and rotating all twenty-eight exact recipes.
+    `
+    : `
+    This is an Empty Meal Review. Intentionally retain between zero and seven
+    Same Meals only when doing so improves nutritional balance and weekly variety.
+    Do not choose retained meals randomly. Change at least twenty-one meals.
+    `;
   const repair = request.validationDetails?.length
     ? `The previous result failed these rules: ${request.validationDetails.join(", ")}. Repair every listed rule.`
     : "";
 
   return `
     Act as a world-class nutritionist.
-    Create the Next Weekly Plan after an explicitly Empty Meal Review.
+    Create the Next Weekly Plan from the immediately preceding Weekly Plan only.
     The complete immediately preceding Weekly Plan is:
     ${currentPlan}
 
-    Intentionally retain between zero and seven Same Meals only when doing so improves
-    nutritional balance and weekly variety. Do not choose retained meals randomly.
+    ${review}
+
     A retained Same Meal must be an exact recipe copy, keep its meal type, and move to a
-    different day. Change at least twenty-one meals. A renamed meal with the same
-    normalized ingredients and preparation is still the Same Meal.
+    different day. A renamed meal with the same normalized ingredients and
+    preparation is still the Same Meal.
     Return exactly seven days with breakfast, lunch, dinner, and snack, and
     recalculate each daily macro summary from those four meals.
+    Build replacement meals around the retained meals so each day remains
+    nutritionally balanced for the user's profile and goal.
 
     Continue to respect this profile:
     - Age: ${profile.age}
@@ -522,7 +546,7 @@ async function generate(request: GenerationRequest): Promise<GenerationResult> {
     return callOpenAI(
       apiKey,
       model,
-      request.reviewType === "empty"
+      request.reviewType === "empty" || request.reviewType === "partial"
         ? buildNextWeeklyPlanPrompt(request, profile)
         : buildPlanPrompt(profile, feedback as Feedback[] | undefined),
       "meal_plan",
