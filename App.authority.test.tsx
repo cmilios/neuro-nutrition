@@ -7,12 +7,14 @@ import type { AuthoritativeWeeklyPlanRow } from "./types";
 const {
   getProfileData,
   getCurrent,
+  getPendingMealRerolls,
   setIngredientChecked,
   subscribeToInvalidations,
   realtimeCallbacks,
 } = vi.hoisted(() => ({
   getProfileData: vi.fn(),
   getCurrent: vi.fn(),
+  getPendingMealRerolls: vi.fn(),
   setIngredientChecked: vi.fn(),
   subscribeToInvalidations: vi.fn(),
   realtimeCallbacks: [] as Array<{
@@ -50,6 +52,7 @@ vi.mock("./services/weeklyPlanGateway", () => ({
   createWeeklyPlanInvalidationSubscription: subscribeToInvalidations,
   weeklyPlanGateway: {
     getCurrent,
+    getPendingMealRerolls,
     createCurrent: vi.fn(),
     saveCurrent: vi.fn(),
     setIngredientChecked,
@@ -83,6 +86,7 @@ const authoritativeRow = (
 describe("authority-first Current Weekly Plan loading", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    getPendingMealRerolls.mockReset().mockResolvedValue([]);
     getProfileData.mockReset().mockResolvedValue({
       profile: {
         age: 30,

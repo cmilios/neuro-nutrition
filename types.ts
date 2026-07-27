@@ -119,6 +119,22 @@ export interface IngredientProgressCommand {
   checked: boolean;
 }
 
+export interface MealRerollCommand {
+  commandId: string;
+  displayedPlanId: string;
+  displayedRevision: number;
+  day: string;
+  mealType: MealType;
+}
+
+export interface MealRerollReservation {
+  commandId: string;
+  planId: string;
+  day: string;
+  mealType: MealType;
+  reservedAt: string;
+}
+
 export interface User {
   id: string;
   email: string;

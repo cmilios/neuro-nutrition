@@ -13,7 +13,7 @@ import {
   UserProfile,
   MealPlan,
   User,
-  Meal,
+  MealRerollReservation,
   MealFeedback,
   Milestone,
   MealType,
@@ -21,7 +21,7 @@ import {
 import {
   generateInitialWeeklyPlan,
   generateMealPlan,
-  regenerateSingleMeal,
+  rerollMeal,
 } from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
@@ -67,8 +67,10 @@ const App: React.FC = () => {
   const [rerollRetry, setRerollRetry] = useState<{
     dayIndex: number;
     mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack';
-    currentMeal: Meal;
+    commandId: string | null;
   } | null>(null);
+  const [pendingMealRerolls, setPendingMealRerolls] =
+    useState<MealRerollReservation[]>([]);
   const [nextWeekRetry, setNextWeekRetry] = useState<{
     feedback: MealFeedback[];
     currentPlan: MealPlan;
@@ -148,6 +150,7 @@ const App: React.FC = () => {
         setMilestones([]);
         setNextWeekRetry(null);
         setRerollRetry(null);
+        setPendingMealRerolls([]);
         setPendingIngredientIds([]);
         initialGenerationCommandRef.current = null;
         setPlanAuthorityStatus('checking');
@@ -214,10 +217,14 @@ const App: React.FC = () => {
         if (!cancelled) setError('Failed to load your data. Please refresh.');
       });
 
-    weeklyPlanGateway.getCurrent(user.id)
-      .then((currentPlan) => {
+    Promise.all([
+      weeklyPlanGateway.getCurrent(user.id),
+      weeklyPlanGateway.getPendingMealRerolls(user.id),
+    ])
+      .then(([currentPlan, reservations]) => {
         if (cancelled || loadedUserIdRef.current !== user.id) return;
         try {
+          setPendingMealRerolls(reservations);
           if (!currentPlan) {
             clearAuthoritativePlan(user.id);
             setPlanAuthorityStatus('confirmed-empty');
@@ -255,8 +262,20 @@ const App: React.FC = () => {
 
       refetchInFlight = true;
       try {
-        const currentPlan = await weeklyPlanGateway.getCurrent(user.id);
+        const [currentPlan, reservations] = await Promise.all([
+          weeklyPlanGateway.getCurrent(user.id),
+          weeklyPlanGateway.getPendingMealRerolls(user.id),
+        ]);
         if (cancelled) return;
+        setPendingMealRerolls(reservations);
+        setRerollRetry((current) =>
+          current?.commandId
+          && !reservations.some((reservation) =>
+            reservation.commandId === current.commandId
+          )
+            ? null
+            : current
+        );
         if (!currentPlan) {
           clearAuthoritativePlan(user.id);
           setPlanAuthorityStatus('confirmed-empty');
@@ -334,6 +353,7 @@ const App: React.FC = () => {
       setMilestones([]);
       setNextWeekRetry(null);
       setRerollRetry(null);
+      setPendingMealRerolls([]);
       setPendingIngredientIds([]);
       initialGenerationCommandRef.current = null;
       setPlanAuthorityStatus('checking');
@@ -435,45 +455,82 @@ const App: React.FC = () => {
   }
 
   const handleRerollMeal = async (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => {
-    if (!user || !profile || !mealPlan || planAuthorityStatus !== 'synchronized') return;
+    if (!user || !profile || !mealPlan || !authoritativePlan || planAuthorityStatus !== 'synchronized') return;
 
     const retryRequest = rerollRetry?.dayIndex === dayIndex && rerollRetry.mealType === mealType
       ? rerollRetry
       : null;
-    const currentMeal = retryRequest?.currentMeal ?? mealPlan.days[dayIndex][mealType];
+    const day = mealPlan.days[dayIndex];
+    if (!day) return;
+    const commandId = retryRequest?.commandId ?? crypto.randomUUID();
+    const command = {
+      commandId,
+      displayedPlanId: authoritativePlan.planId,
+      displayedRevision: authoritativePlan.revision,
+      day: day.day,
+      mealType,
+    };
+    let commandOutcomeReceived = false;
     setRerollingState({ dayIndex, mealType });
     setError(null);
 
     try {
-      const newMeal = await regenerateSingleMeal(profile, mealType, currentMeal);
-
-      const updatedDays = [...mealPlan.days];
-      const targetDay = { ...updatedDays[dayIndex] };
-
-      // Update specific meal
-      targetDay[mealType] = newMeal;
-
-      // Recalculate daily summary
-      const meals = [targetDay.breakfast, targetDay.lunch, targetDay.dinner, targetDay.snack];
-
-      targetDay.dailySummary = meals.reduce((acc, meal) => ({
-        calories: acc.calories + meal.macros.calories,
-        protein: acc.protein + meal.macros.protein,
-        carbs: acc.carbs + meal.macros.carbs,
-        fats: acc.fats + meal.macros.fats
-      }), { calories: 0, protein: 0, carbs: 0, fats: 0 });
-
-      updatedDays[dayIndex] = targetDay;
-      const updatedPlan = { ...mealPlan, days: updatedDays };
-
-      await saveCurrentWeeklyPlan(user.id, updatedPlan);
-      setMealPlan(updatedPlan);
+      const outcome = await rerollMeal(profile, command);
+      commandOutcomeReceived = true;
+      if (outcome.status === 'in_progress') {
+        setRerollRetry({ dayIndex, mealType, commandId });
+        requestPlanRefetchRef.current?.();
+        return;
+      }
+      if (outcome.status !== 'succeeded' || !outcome.result) {
+        setRerollRetry({ dayIndex, mealType, commandId: null });
+        throw new Error(outcome.error?.message || 'The Meal Reroll did not succeed.');
+      }
+      applyAuthoritativePlan(outcome.result, user.id);
       setRerollRetry(null);
-
     } catch (err) {
       console.error(err);
-      setRerollRetry({ dayIndex, mealType, currentMeal });
-      setError(errorMessage(err, 'Failed to regenerate the meal. Please try again.'));
+      if (!commandOutcomeReceived) {
+        setPendingMealRerolls((current) => current.some((reservation) =>
+          reservation.commandId === commandId
+        ) ? current : [...current, {
+          commandId,
+          planId: authoritativePlan.planId,
+          day: day.day,
+          mealType,
+          reservedAt: new Date().toISOString(),
+        }]);
+        void rerollMeal(profile, command)
+          .then((outcome) => {
+            if (outcome.status === 'succeeded' && outcome.result) {
+              applyAuthoritativePlan(outcome.result, user.id);
+              setPendingMealRerolls((current) =>
+                current.filter((reservation) => reservation.commandId !== commandId)
+              );
+              setRerollRetry(null);
+              setError(null);
+              return;
+            }
+            if (outcome.status === 'failed') {
+              setPendingMealRerolls((current) =>
+                current.filter((reservation) => reservation.commandId !== commandId)
+              );
+              setRerollRetry({ dayIndex, mealType, commandId: null });
+              setError(outcome.error?.message || 'Meal Reroll failed.');
+              return;
+            }
+            requestPlanRefetchRef.current?.();
+          })
+          .catch(() => {
+            requestPlanRefetchRef.current?.();
+          });
+      }
+      setRerollRetry((current) =>
+        current?.dayIndex === dayIndex && current.mealType === mealType
+          ? current
+          : { dayIndex, mealType, commandId }
+      );
+      setError(errorMessage(err, 'Meal Reroll failed. Please try again.'));
     } finally {
       setRerollingState(null);
     }
@@ -637,6 +694,8 @@ const App: React.FC = () => {
   }
 
   const planIsReadOnly = planAuthorityStatus !== 'synchronized';
+  const planLifecycleBlocked =
+    planIsReadOnly || !!rerollingState || pendingMealRerolls.length > 0;
 
   return (
     <Layout
@@ -647,7 +706,7 @@ const App: React.FC = () => {
       onLogout={handleLogout}
       hasProfile={!!mealPlan}
       canRetryNextWeek={!!nextWeekRetry}
-      planMutationsDisabled={planIsReadOnly}
+      planMutationsDisabled={planLifecycleBlocked}
       currentView={currentView}
       onViewChange={setCurrentView}
     >
@@ -713,6 +772,7 @@ const App: React.FC = () => {
                 onReroll={handleRerollMeal}
                 rerollingState={rerollingState}
                 rerollRetry={rerollRetry}
+                pendingMealRerolls={pendingMealRerolls}
                 onToggleIngredient={handleToggleIngredient}
                 pendingIngredientIds={pendingIngredientIds}
                 isReadOnly={planIsReadOnly}

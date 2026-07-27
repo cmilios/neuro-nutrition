@@ -20,6 +20,9 @@ export interface GenerationRequest {
   mealType?: string;
   currentMeal?: Meal;
   currentPlan?: WeeklyPlan;
+  displayedPlanId?: string;
+  displayedRevision?: number;
+  day?: string;
   reviewType?: "empty" | "partial";
   attempt?: number;
   validationDetails?: string[];
@@ -62,6 +65,7 @@ export interface GenerateMealPlanDependencies {
   generate(request: GenerationRequest): Promise<GenerationResult>;
   persist(record: GenerationRecord): Promise<void>;
   initialGeneration?: InitialGenerationCommandStore;
+  mealReroll?: MealRerollCommandStore;
 }
 
 export interface WeeklyPlanCommandError {
@@ -77,6 +81,44 @@ export interface InitialGenerationCommandOutcome {
   error: WeeklyPlanCommandError | null;
   shouldGenerate: boolean;
   checkpoint?: InitialGenerationCheckpoint | null;
+}
+
+export interface MealRerollTarget {
+  planId: string;
+  day: string;
+  mealType: string;
+  meal: Meal;
+}
+
+export interface MealRerollCommandOutcome extends InitialGenerationCommandOutcome {
+  target?: MealRerollTarget | null;
+}
+
+export interface MealRerollCommandStore {
+  begin(
+    identity: InitialGenerationCommandIdentity & {
+      displayedPlanId: string;
+      displayedRevision: number;
+      day: string;
+      mealType: string;
+    },
+  ): Promise<MealRerollCommandOutcome>;
+  checkpoint(
+    command: InitialGenerationCommandIdentity & {
+      checkpoint: InitialGenerationCheckpoint;
+    },
+  ): Promise<MealRerollCommandOutcome>;
+  complete(
+    command: InitialGenerationCommandIdentity & { meal: Meal },
+  ): Promise<MealRerollCommandOutcome>;
+  fail(
+    command: InitialGenerationCommandIdentity & {
+      errorCode: string;
+      errorMessage: string;
+      retryable: boolean;
+      evidence: Record<string, unknown>;
+    },
+  ): Promise<MealRerollCommandOutcome>;
 }
 
 export type InitialGenerationCheckpoint =
@@ -173,19 +215,36 @@ async function fingerprintInitialGeneration(request: GenerationRequest): Promise
     operation: "generate_initial",
     profile: request.profile,
   }));
+  return sha256Hex(normalized);
+}
+
+async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(normalized),
+    new TextEncoder().encode(value),
   );
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
-const commandResponse = (outcome: InitialGenerationCommandOutcome) => {
+async function fingerprintMealReroll(request: GenerationRequest): Promise<string> {
+  const normalized = JSON.stringify(normalizeForFingerprint({
+    operation: "reroll_meal",
+    profile: request.profile,
+    displayedPlanId: request.displayedPlanId,
+    displayedRevision: request.displayedRevision,
+    day: request.day,
+    mealType: request.mealType,
+  }));
+  return sha256Hex(normalized);
+}
+
+const commandResponse = (outcome: MealRerollCommandOutcome) => {
   const {
     shouldGenerate: _shouldGenerate,
     checkpoint: _checkpoint,
+    target: _target,
     ...response
   } = outcome;
   return response;
@@ -270,7 +329,16 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
   if (body.action === "meal" && (typeof body.mealType !== "string" || !allowedMealTypes.has(body.mealType))) {
     throw new HttpError("Invalid mealType.", 400, "invalid_meal_type");
   }
-  if (body.action === "meal" && !validMeal(body.currentMeal)) {
+  const isDurableMealReroll =
+    body.action === "meal" &&
+    typeof body.commandId === "string" &&
+    typeof body.displayedPlanId === "string" &&
+    typeof body.displayedRevision === "number" &&
+    Number.isInteger(body.displayedRevision) &&
+    body.displayedRevision >= 0 &&
+    typeof body.day === "string" &&
+    body.day.length > 0;
+  if (body.action === "meal" && !isDurableMealReroll && !validMeal(body.currentMeal)) {
     throw new HttpError("The current meal is required.", 400, "missing_current_meal");
   }
 
@@ -463,6 +531,211 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           },
         });
         return await finalizeCheckpoint(checkpointed);
+      }
+
+      const isDurableMealReroll =
+        generationRequest.action === "meal" &&
+        dependencies.mealReroll;
+      if (isDurableMealReroll) {
+        if (
+          generationRequest.currentMeal !== undefined ||
+          generationRequest.currentPlan !== undefined ||
+          typeof generationRequest.commandId !== "string" ||
+          !commandIdPattern.test(generationRequest.commandId) ||
+          typeof generationRequest.displayedPlanId !== "string" ||
+          !commandIdPattern.test(generationRequest.displayedPlanId) ||
+          typeof generationRequest.displayedRevision !== "number" ||
+          !Number.isInteger(generationRequest.displayedRevision) ||
+          generationRequest.displayedRevision < 0 ||
+          typeof generationRequest.day !== "string" ||
+          !generationRequest.day ||
+          typeof generationRequest.mealType !== "string"
+        ) {
+          throw new HttpError(
+            "A valid Meal Reroll command is required.",
+            400,
+            "invalid_command",
+          );
+        }
+
+        const identity = {
+          commandId: generationRequest.commandId,
+          userId: user.id,
+          inputFingerprint: await fingerprintMealReroll(generationRequest),
+        };
+        const finalizeCheckpoint = async (
+          outcome: MealRerollCommandOutcome,
+        ): Promise<Response> => {
+          const checkpoint = outcome.checkpoint;
+          if (!checkpoint) return json(commandResponse(outcome));
+
+          const usagePersisted = await persistAndReport(
+            user!,
+            generationRequest!,
+            checkpoint.usageRecord,
+          );
+          if (!usagePersisted) {
+            throw new HttpError(
+              "The provider attempt is awaiting durable reconciliation.",
+              503,
+              "usage_persistence_failed",
+            );
+          }
+          if (checkpoint.kind === "unknown") {
+            throw new HttpError(
+              "The provider outcome is unknown and requires reconciliation.",
+              503,
+              "generation_outcome_unknown",
+            );
+          }
+          if (checkpoint.kind === "failure") {
+            const failed = await dependencies.mealReroll!.fail({
+              ...identity,
+              errorCode: checkpoint.error.code,
+              errorMessage: checkpoint.error.message,
+              retryable: checkpoint.error.retryable,
+              evidence: checkpoint.evidence,
+            });
+            return json(commandResponse(failed));
+          }
+
+          const generated = checkpoint.document as Meal & { mealType?: string };
+          const { mealType: _mealType, ...meal } = generated;
+          const completed = await dependencies.mealReroll!.complete({
+            ...identity,
+            meal,
+          });
+          return json(commandResponse(completed));
+        };
+
+        const started = await dependencies.mealReroll.begin({
+          ...identity,
+          displayedPlanId: generationRequest.displayedPlanId,
+          displayedRevision: generationRequest.displayedRevision,
+          day: generationRequest.day,
+          mealType: generationRequest.mealType,
+        });
+        if (!started.shouldGenerate) {
+          return await finalizeCheckpoint(started);
+        }
+        if (
+          !started.target ||
+          !validMeal(started.target.meal) ||
+          started.target.day !== generationRequest.day ||
+          started.target.mealType !== generationRequest.mealType
+        ) {
+          const failed = await dependencies.mealReroll.fail({
+            ...identity,
+            errorCode: "meal_slot_not_found",
+            errorMessage: "The authoritative Meal Slot could not be reserved.",
+            retryable: false,
+            evidence: { stage: "start", reason: "invalid_reserved_target" },
+          });
+          return json(commandResponse(failed));
+        }
+
+        let validationDetails: string[] | undefined;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          let result: GenerationResult;
+          try {
+            result = await dependencies.generate({
+              ...generationRequest,
+              currentMeal: started.target.meal,
+              attempt,
+              validationDetails,
+            });
+          } catch (error) {
+            if (error instanceof ProviderGenerationError) {
+              const checkpointed = await dependencies.mealReroll.checkpoint({
+                ...identity,
+                checkpoint: {
+                  kind: error.outcomeUnknown ? "unknown" : "failure",
+                  usageRecord: error.usageRecord,
+                  error: {
+                    code: error.outcomeUnknown
+                      ? "generation_outcome_unknown"
+                      : "generation_failed",
+                    message: error.outcomeUnknown
+                      ? "The provider outcome is unknown and requires reconciliation."
+                      : "A usable replacement meal was not created.",
+                    retryable: false,
+                  },
+                  evidence: { stage: "provider", reason: error.code },
+                },
+              });
+              return await finalizeCheckpoint(checkpointed);
+            }
+            throw error;
+          }
+
+          const returnedMealType = result.data && typeof result.data === "object"
+            ? (result.data as Record<string, unknown>).mealType
+            : undefined;
+          const validationCode = !validMeal(result.data)
+            ? "invalid_meal"
+            : returnedMealType !== generationRequest.mealType
+            ? "wrong_meal_type"
+            : isSameMeal(started.target.meal, result.data)
+            ? "same_meal"
+            : undefined;
+          if (!validationCode) {
+            const checkpointed = await dependencies.mealReroll.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: "success",
+                document: result.data,
+                usageRecord: result.usageRecord,
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          }
+
+          validationDetails = [validationCode];
+          const failedUsage = {
+            ...result.usageRecord,
+            outcome: "failure" as const,
+            validationCodes: validationDetails,
+            errorCode: "invalid_meal_reroll",
+          };
+          const usagePersisted = await persistAndReport(
+            user,
+            generationRequest,
+            failedUsage,
+          );
+          if (!usagePersisted) {
+            const checkpointed = await dependencies.mealReroll.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: "failure",
+                usageRecord: failedUsage,
+                error: {
+                  code: "generation_failed",
+                  message: "A usable replacement meal was not created.",
+                  retryable: false,
+                },
+                evidence: {
+                  stage: "usage_persistence",
+                  reason: "usage_persistence_failed",
+                  validationCodes: validationDetails,
+                },
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          }
+        }
+
+        const failed = await dependencies.mealReroll.fail({
+          ...identity,
+          errorCode: "generation_failed",
+          errorMessage: "A different usable meal was not created.",
+          retryable: false,
+          evidence: {
+            stage: "validation",
+            reason: "invalid_meal_reroll",
+            validationCodes: validationDetails ?? [],
+          },
+        });
+        return json(commandResponse(failed));
       }
 
       const isNextWeeklyPlanReview =

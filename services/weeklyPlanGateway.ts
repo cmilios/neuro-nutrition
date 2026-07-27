@@ -2,6 +2,7 @@ import type {
   AuthoritativeWeeklyPlanRow,
   IngredientProgressCommand,
   MealPlan,
+  MealRerollReservation,
   Milestone,
   UserProfile,
   WeeklyPlanCommandOutcome,
@@ -50,6 +51,7 @@ export interface WeeklyPlanGateway {
   saveCurrent(command: SaveCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
   setIngredientChecked(command: IngredientProgressCommand): Promise<WeeklyPlanCommandOutcome>;
   startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome>;
+  getPendingMealRerolls(userId: string): Promise<MealRerollReservation[]>;
 }
 
 interface WeeklyPlanDatabaseRow {
@@ -132,6 +134,25 @@ export const createIngredientProgressGateway = (
   },
 });
 
+export const createMealRerollReservationReader = (
+  client: Pick<SupabaseClient, "from">,
+) => ({
+  async getPendingMealRerolls(userId: string): Promise<MealRerollReservation[]> {
+    const { data, error } = await client
+      .from("weekly_plan_meal_reroll_reservations")
+      .select("command_id, plan_id, day, meal_type, reserved_at")
+      .eq("user_id", userId);
+    if (error) throw error;
+    return (data ?? []).map((row) => ({
+      commandId: row.command_id,
+      planId: row.plan_id,
+      day: row.day,
+      mealType: row.meal_type,
+      reservedAt: row.reserved_at,
+    })) as MealRerollReservation[];
+  },
+});
+
 export type WeeklyPlanRealtimeStatus = "connected" | "disconnected";
 
 export const createWeeklyPlanInvalidationSubscription = (
@@ -148,6 +169,16 @@ export const createWeeklyPlanInvalidationSubscription = (
         event: "*",
         schema: "public",
         table: "weekly_plans",
+        filter: `user_id=eq.${userId}`,
+      },
+      onInvalidated,
+    )
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "weekly_plan_meal_reroll_reservations",
         filter: `user_id=eq.${userId}`,
       },
       onInvalidated,
@@ -256,14 +287,19 @@ export const createWeeklyPlanGateway = (
       return failedOutcome(command.commandId, error);
     }
   },
+  async getPendingMealRerolls() {
+    return [];
+  },
 });
 
 const legacyWeeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage);
 const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
 const ingredientProgressGateway = createIngredientProgressGateway(supabase);
+const mealRerollReservationReader = createMealRerollReservationReader(supabase);
 
 export const weeklyPlanGateway: WeeklyPlanGateway = {
   ...legacyWeeklyPlanGateway,
   getCurrent: authoritativeWeeklyPlanReader.getCurrent,
   setIngredientChecked: ingredientProgressGateway.setIngredientChecked,
+  getPendingMealRerolls: mealRerollReservationReader.getPendingMealRerolls,
 };

@@ -5,10 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   getProfileData,
   getCurrent,
+  getPendingMealRerolls,
   startOver,
 } = vi.hoisted(() => ({
   getProfileData: vi.fn(),
   getCurrent: vi.fn(),
+  getPendingMealRerolls: vi.fn(),
   startOver: vi.fn(),
 }));
 
@@ -41,6 +43,7 @@ vi.mock("./services/weeklyPlanGateway", () => ({
   })),
   weeklyPlanGateway: {
     getCurrent,
+    getPendingMealRerolls,
     createCurrent: vi.fn(),
     saveCurrent: vi.fn(),
     setIngredientChecked: vi.fn(),
@@ -70,6 +73,7 @@ import App from "./App";
 
 describe("application Start Over flow", () => {
   beforeEach(() => {
+    getPendingMealRerolls.mockReset().mockResolvedValue([]);
     getProfileData.mockReset().mockResolvedValue({
       profile: {
         age: 30,

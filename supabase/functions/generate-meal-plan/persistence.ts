@@ -2,6 +2,7 @@ import type {
   GenerationRecord,
   InitialGenerationCommandOutcome,
   InitialGenerationCommandStore,
+  MealRerollCommandStore,
 } from "./handler.ts";
 
 interface PersistenceOptions {
@@ -146,4 +147,72 @@ export function createInitialGenerationCommandStore(
       });
     },
   };
+}
+
+export function createMealRerollCommandStore(
+  options: CommandPersistenceOptions,
+): MealRerollCommandStore {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const rpc = async (
+    functionName: string,
+    body: Record<string, unknown>,
+  ): Promise<InitialGenerationCommandOutcome> => {
+    const response = await fetchImpl(
+      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: options.serviceRoleKey,
+          Authorization: `Bearer ${options.serviceRoleKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Meal Reroll command ${functionName} failed with HTTP ${response.status}`);
+    }
+    return await response.json() as InitialGenerationCommandOutcome;
+  };
+
+  return {
+    begin(identity) {
+      return rpc("begin_meal_reroll", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+        p_input_fingerprint: identity.inputFingerprint,
+        p_displayed_plan_id: identity.displayedPlanId,
+        p_displayed_revision: identity.displayedRevision,
+        p_day: identity.day,
+        p_meal_type: identity.mealType,
+      });
+    },
+    checkpoint(command) {
+      return rpc("checkpoint_meal_reroll", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_checkpoint: command.checkpoint,
+      });
+    },
+    complete(command) {
+      return rpc("complete_meal_reroll", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_meal: command.meal,
+      });
+    },
+    fail(command) {
+      return rpc("fail_meal_reroll", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_code: command.errorCode,
+        p_message: command.errorMessage,
+        p_retryable: command.retryable,
+        p_evidence: command.evidence,
+      });
+    },
+  } as MealRerollCommandStore;
 }

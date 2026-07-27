@@ -8,6 +8,7 @@ const {
   getProfileData,
   saveProfileData,
   getCurrent,
+  getPendingMealRerolls,
   createCurrent,
   saveCurrent,
   setIngredientChecked,
@@ -17,6 +18,7 @@ const {
   getProfileData: vi.fn(),
   saveProfileData: vi.fn(),
   getCurrent: vi.fn(),
+  getPendingMealRerolls: vi.fn(),
   createCurrent: vi.fn(),
   saveCurrent: vi.fn(),
   setIngredientChecked: vi.fn(),
@@ -53,6 +55,7 @@ vi.mock("./services/weeklyPlanGateway", () => ({
   })),
   weeklyPlanGateway: {
     getCurrent,
+    getPendingMealRerolls,
     createCurrent,
     saveCurrent,
     setIngredientChecked,
@@ -87,6 +90,7 @@ describe("application generation flow", () => {
         generationId: null,
       } : null;
     });
+    getPendingMealRerolls.mockReset().mockResolvedValue([]);
     createCurrent.mockReset().mockImplementation(async ({ commandId, userId, document }) => ({
       commandId,
       status: "succeeded",
@@ -312,7 +316,29 @@ describe("application generation flow", () => {
       name: "Rerolled Breakfast",
       macros: { calories: 450, protein: 35, carbs: 42, fats: 14 },
     };
-    edgeFunctionInvoke.mockResolvedValue({ data: { data: rerolledMeal }, error: null });
+    const rerolledPlan = structuredClone(weeklyPlanFixture);
+    rerolledPlan.days[0].breakfast = rerolledMeal;
+    edgeFunctionInvoke.mockImplementation(async (_name, options) => ({
+      data: {
+        commandId: options.body.commandId,
+        status: "succeeded",
+        result: {
+          planId: "00000000-0000-4000-8000-000000000010",
+          userId: "user-1",
+          document: rerolledPlan,
+          schemaVersion: 1,
+          revision: 1,
+          isActive: true,
+          createdAt: "2026-07-27T10:00:00.000Z",
+          updatedAt: "2026-07-27T10:01:00.000Z",
+          deactivatedAt: null,
+          predecessorPlanId: null,
+          generationId: null,
+        },
+        error: null,
+      },
+      error: null,
+    }));
     const user = userEvent.setup();
     render(<App />);
 
@@ -324,28 +350,109 @@ describe("application generation flow", () => {
       body: expect.objectContaining({
         action: "meal",
         mealType: "breakfast",
-        currentMeal: weeklyPlanFixture.days[0].breakfast,
+        displayedPlanId: "00000000-0000-4000-8000-000000000010",
+        displayedRevision: 0,
+        day: "Monday",
+        commandId: expect.any(String),
       }),
     });
-    expect(saveCurrent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: "user-1",
-        document: expect.objectContaining({
-          days: expect.arrayContaining([
-            expect.objectContaining({
-              breakfast: rerolledMeal,
-              lunch: weeklyPlanFixture.days[0].lunch,
-              dailySummary: {
-                calories: 1650,
-                protein: 125,
-                carbs: 162,
-                fats: 50,
-              },
-            }),
-          ]),
-        }),
-      }),
-    );
+    expect(edgeFunctionInvoke.mock.calls[0][1].body).not.toHaveProperty("currentMeal");
+    expect(edgeFunctionInvoke.mock.calls[0][1].body).not.toHaveProperty("currentPlan");
+    expect(saveCurrent).not.toHaveBeenCalled();
+  });
+
+  it("keeps a response-loss Meal Reroll pending and forces an authoritative refetch", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getPendingMealRerolls
+      .mockResolvedValueOnce([])
+      .mockImplementation(async () => [{
+        commandId: edgeFunctionInvoke.mock.calls[0][1].body.commandId,
+        planId: "00000000-0000-4000-8000-000000000010",
+        day: "Monday",
+        mealType: "breakfast",
+        reservedAt: "2026-07-27T10:00:30.000Z",
+      }]);
+    edgeFunctionInvoke.mockResolvedValue({
+      data: null,
+      error: { message: "Connection lost after the command was sent." },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getAllByTitle("Reroll this meal")[0]);
+
+    expect(await screen.findByText("Connection lost after the command was sent."))
+      .toBeInTheDocument();
+    expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try Again" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reroll this meal" })[0])
+      .toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next Week" })).toBeDisabled();
+    await waitFor(() => expect(getCurrent).toHaveBeenCalledTimes(2));
+  });
+
+  it("reconciles response loss after commit by replaying the same command identity", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    const completedPlan = structuredClone(weeklyPlanFixture);
+    completedPlan.days[0].breakfast.name = "Committed Reroll Breakfast";
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    edgeFunctionInvoke
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "Response lost after commit." },
+      })
+      .mockImplementationOnce(async (_name, options) => ({
+        data: {
+          commandId: options.body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000010",
+            userId: "user-1",
+            document: completedPlan,
+            schemaVersion: 1,
+            revision: 1,
+            isActive: true,
+            createdAt: "2026-07-27T10:00:00.000Z",
+            updatedAt: "2026-07-27T10:01:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: null,
+            generationId: null,
+          },
+          error: null,
+        },
+        error: null,
+      }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getAllByTitle("Reroll this meal")[0]);
+
+    expect(await screen.findByText("Committed Reroll Breakfast")).toBeInTheDocument();
+    expect(edgeFunctionInvoke).toHaveBeenCalledTimes(2);
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId)
+      .toBe(edgeFunctionInvoke.mock.calls[0][1].body.commandId);
+    expect(screen.queryByRole("button", { name: "Try Again" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Reroll this meal" })[0])
+      .toBeEnabled();
   });
 
   it("persists ingredient progress through the Weekly Plan gateway", async () => {
@@ -461,7 +568,7 @@ describe("application generation flow", () => {
     expect(saveCurrent).not.toHaveBeenCalled();
   });
 
-  it("preserves the original meal and reuses the in-memory Meal Reroll request through Try Again", async () => {
+  it("preserves the original meal and uses a new command after terminal Meal Reroll failure", async () => {
     const profile = {
       age: 30,
       gender: "Male",
@@ -477,12 +584,43 @@ describe("application generation flow", () => {
       ingredients: ["replacement ingredient"],
     };
     getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const replacementPlan = structuredClone(weeklyPlanFixture);
+    replacementPlan.days[0].breakfast = replacement;
     edgeFunctionInvoke
-      .mockResolvedValueOnce({
-        data: null,
-        error: { message: "A different meal was not created. Your original meal is unchanged." },
-      })
-      .mockResolvedValueOnce({ data: { data: replacement }, error: null });
+      .mockImplementationOnce(async (_name, options) => ({
+        data: {
+          commandId: options.body.commandId,
+          status: "failed",
+          result: null,
+          error: {
+            code: "generation_failed",
+            message: "A different meal was not created. Your original meal is unchanged.",
+            retryable: false,
+          },
+        },
+        error: null,
+      }))
+      .mockImplementationOnce(async (_name, options) => ({
+        data: {
+          commandId: options.body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000010",
+            userId: "user-1",
+            document: replacementPlan,
+            schemaVersion: 1,
+            revision: 1,
+            isActive: true,
+            createdAt: "2026-07-27T10:00:00.000Z",
+            updatedAt: "2026-07-27T10:01:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: null,
+            generationId: null,
+          },
+          error: null,
+        },
+        error: null,
+      }))
     const user = userEvent.setup();
     render(<App />);
 
@@ -499,7 +637,8 @@ describe("application generation flow", () => {
     await user.click(tryAgain);
 
     expect(await screen.findByText("Successful Retry Breakfast")).toBeInTheDocument();
-    expect(edgeFunctionInvoke.mock.calls[1][1]).toEqual(firstRequest);
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId)
+      .not.toBe(firstRequest.body.commandId);
     expect(screen.queryByRole("button", { name: "Try Again" })).not.toBeInTheDocument();
     expect(screen.getAllByTitle("Reroll this meal")).toHaveLength(4);
   });
@@ -515,10 +654,19 @@ describe("application generation flow", () => {
       dietType: "Mediterranean",
     };
     getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
-    edgeFunctionInvoke.mockResolvedValue({
-      data: null,
-      error: { message: "A different meal was not created. Your original meal is unchanged." },
-    });
+    edgeFunctionInvoke.mockImplementation(async (_name, options) => ({
+      data: {
+        commandId: options.body.commandId,
+        status: "failed",
+        result: null,
+        error: {
+          code: "generation_failed",
+          message: "A different meal was not created. Your original meal is unchanged.",
+          retryable: false,
+        },
+      },
+      error: null,
+    }));
     const user = userEvent.setup();
     const firstSession = render(<App />);
 

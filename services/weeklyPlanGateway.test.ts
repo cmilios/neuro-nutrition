@@ -4,11 +4,40 @@ import { ActivityLevel, DietType, Gender, Goal } from "../types";
 import {
   createAuthoritativeWeeklyPlanReader,
   createIngredientProgressGateway,
+  createMealRerollReservationReader,
   createWeeklyPlanInvalidationSubscription,
   createWeeklyPlanGateway,
 } from "./weeklyPlanGateway";
 
 describe("Weekly Plan gateway", () => {
+  it("loads pending Meal Slot reservations for remote presentation", async () => {
+    const query = {
+      select: vi.fn(),
+      eq: vi.fn().mockResolvedValue({
+        data: [{
+          command_id: "10000000-0000-4000-8000-000000000001",
+          plan_id: "20000000-0000-4000-8000-000000000001",
+          day: "Monday",
+          meal_type: "breakfast",
+          reserved_at: "2026-07-27T10:00:00.000Z",
+        }],
+        error: null,
+      }),
+    };
+    query.select.mockReturnValue(query);
+    const reader = createMealRerollReservationReader({
+      from: vi.fn().mockReturnValue(query),
+    } as never);
+
+    await expect(reader.getPendingMealRerolls("user-1")).resolves.toEqual([{
+      commandId: "10000000-0000-4000-8000-000000000001",
+      planId: "20000000-0000-4000-8000-000000000001",
+      day: "Monday",
+      mealType: "breakfast",
+      reservedAt: "2026-07-27T10:00:00.000Z",
+    }]);
+  });
+
   it("loads and maps the authenticated user's active authoritative row", async () => {
     const maybeSingle = vi.fn().mockResolvedValue({
       data: {
@@ -342,6 +371,16 @@ describe("Weekly Plan gateway", () => {
         event: "*",
         schema: "public",
         table: "weekly_plans",
+        filter: "user_id=eq.user-1",
+      },
+      expect.any(Function),
+    );
+    expect(channel.on).toHaveBeenCalledWith(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "weekly_plan_meal_reroll_reservations",
         filter: "user_id=eq.user-1",
       },
       expect.any(Function),
