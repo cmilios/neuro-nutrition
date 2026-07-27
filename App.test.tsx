@@ -10,6 +10,7 @@ const {
   getCurrent,
   createCurrent,
   saveCurrent,
+  setIngredientChecked,
   startOver,
 } = vi.hoisted(() => ({
   edgeFunctionInvoke: vi.fn(),
@@ -18,6 +19,7 @@ const {
   getCurrent: vi.fn(),
   createCurrent: vi.fn(),
   saveCurrent: vi.fn(),
+  setIngredientChecked: vi.fn(),
   startOver: vi.fn(),
 }));
 
@@ -46,10 +48,14 @@ vi.mock("./services/storageService", () => ({
 }));
 
 vi.mock("./services/weeklyPlanGateway", () => ({
+  createWeeklyPlanInvalidationSubscription: vi.fn(() => ({
+    unsubscribe: vi.fn(),
+  })),
   weeklyPlanGateway: {
     getCurrent,
     createCurrent,
     saveCurrent,
+    setIngredientChecked,
     startOver,
   },
 }));
@@ -117,6 +123,34 @@ describe("application generation flow", () => {
       },
       error: null,
     }));
+    setIngredientChecked.mockReset().mockImplementation(async (command) => {
+      const document = structuredClone(weeklyPlanFixture);
+      const day = document.days.find((candidate) => candidate.day === command.day);
+      const meal = day?.[command.mealType];
+      if (meal) {
+        meal.checkedIngredientIds = command.checked
+          ? [...new Set([...meal.checkedIngredientIds, command.ingredientId])]
+          : meal.checkedIngredientIds.filter((identity) => identity !== command.ingredientId);
+      }
+      return {
+        commandId: command.commandId,
+        status: "succeeded",
+        result: {
+          planId: command.planId,
+          userId: command.userId,
+          document,
+          schemaVersion: 1,
+          revision: command.displayedRevision + 1,
+          isActive: true,
+          createdAt: "2026-07-27T10:00:00.000Z",
+          updatedAt: "2026-07-27T10:01:00.000Z",
+          deactivatedAt: null,
+          predecessorPlanId: null,
+          generationId: null,
+        },
+        error: null,
+      };
+    });
     startOver.mockReset().mockImplementation(async ({ commandId }) => ({
       commandId,
       status: "succeeded",
@@ -331,17 +365,14 @@ describe("application generation flow", () => {
     await user.click(await screen.findByText("Test Berry Breakfast"));
     await user.click(screen.getAllByText("ingredient").at(-1)!);
 
-    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(setIngredientChecked).toHaveBeenCalledWith(expect.objectContaining({
       userId: "user-1",
-      document: expect.objectContaining({
-        days: expect.arrayContaining([
-          expect.objectContaining({
-            breakfast: expect.objectContaining({
-              checkedIngredients: ["ingredient"],
-            }),
-          }),
-        ]),
-      }),
+      planId: "00000000-0000-4000-8000-000000000010",
+      displayedRevision: 0,
+      day: "Monday",
+      mealType: "breakfast",
+      ingredientId: weeklyPlanFixture.days[0].breakfast.ingredientIds[0],
+      checked: true,
     }));
     expect(saveProfileData).not.toHaveBeenCalled();
   });
@@ -357,7 +388,7 @@ describe("application generation flow", () => {
       dietType: "Mediterranean",
     };
     getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
-    saveCurrent.mockResolvedValueOnce({
+    setIngredientChecked.mockResolvedValueOnce({
       commandId: "command-failed",
       status: "failed",
       result: null,

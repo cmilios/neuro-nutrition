@@ -1,15 +1,23 @@
 import type { DayPlan, Meal, MealPlan } from "../types";
 
-const meal = (name: string): Meal => ({
-  name,
-  description: `${name} description`,
-  ingredients: ["ingredient"],
-  instructions: ["Prepare and serve"],
-  macros: { calories: 400, protein: 30, carbs: 40, fats: 12 },
-  cookingTimeMinutes: 20,
-  prepTimeMinutes: 10,
-  portions: 1,
-});
+let ingredientSequence = 1;
+const meal = (name: string): Meal => {
+  const ingredientId =
+    `00000000-0000-4000-8000-${ingredientSequence.toString().padStart(12, "0")}`;
+  ingredientSequence += 1;
+  return {
+    name,
+    description: `${name} description`,
+    ingredients: ["ingredient"],
+    ingredientIds: [ingredientId],
+    checkedIngredientIds: [],
+    instructions: ["Prepare and serve"],
+    macros: { calories: 400, protein: 30, carbs: 40, fats: 12 },
+    cookingTimeMinutes: 20,
+    prepTimeMinutes: 10,
+    portions: 1,
+  };
+};
 
 const day = (name: string, index: number): DayPlan => ({
   day: name,

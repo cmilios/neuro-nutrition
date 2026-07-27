@@ -1,5 +1,6 @@
 import type {
   AuthoritativeWeeklyPlanRow,
+  IngredientProgressCommand,
   MealPlan,
   Milestone,
   UserProfile,
@@ -47,6 +48,7 @@ export interface WeeklyPlanGateway {
   getCurrent(userId: string): Promise<AuthoritativeWeeklyPlanRow | null>;
   createCurrent(command: CreateCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
   saveCurrent(command: SaveCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
+  setIngredientChecked(command: IngredientProgressCommand): Promise<WeeklyPlanCommandOutcome>;
   startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome>;
 }
 
@@ -101,6 +103,65 @@ export const createAuthoritativeWeeklyPlanReader = (
     );
   },
 });
+
+export const createIngredientProgressGateway = (
+  client: Pick<SupabaseClient, "rpc">,
+) => ({
+  async setIngredientChecked(
+    command: IngredientProgressCommand,
+  ): Promise<WeeklyPlanCommandOutcome> {
+    const { data, error } = await client.rpc("set_ingredient_checked", {
+      p_plan_id: command.planId,
+      p_displayed_revision: command.displayedRevision,
+      p_day: command.day,
+      p_meal_type: command.mealType,
+      p_ingredient_id: command.ingredientId,
+      p_checked: command.checked,
+      p_command_id: command.commandId,
+    });
+    if (error) throw error;
+
+    const outcome = data as unknown as WeeklyPlanCommandOutcome;
+    if (outcome.status === "succeeded" && outcome.result) {
+      outcome.result = requireAuthoritativeWeeklyPlanRow(
+        outcome.result,
+        command.userId,
+      );
+    }
+    return outcome;
+  },
+});
+
+export type WeeklyPlanRealtimeStatus = "connected" | "disconnected";
+
+export const createWeeklyPlanInvalidationSubscription = (
+  client: Pick<SupabaseClient, "channel" | "removeChannel">,
+  userId: string,
+  onInvalidated: () => void,
+  onStatusChanged: (status: WeeklyPlanRealtimeStatus) => void,
+) => {
+  const channel = client
+    .channel(`current-weekly-plan:${userId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "weekly_plans",
+        filter: `user_id=eq.${userId}`,
+      },
+      onInvalidated,
+    )
+    .subscribe((status) => {
+      onStatusChanged(status === "SUBSCRIBED" ? "connected" : "disconnected");
+    });
+
+  return {
+    unsubscribe() {
+      void client.removeChannel(channel);
+    },
+  };
+};
 
 const legacyRow = (
   userId: string,
@@ -175,6 +236,13 @@ export const createWeeklyPlanGateway = (
     }
   },
 
+  async setIngredientChecked(command) {
+    return failedOutcome(
+      command.commandId,
+      new Error("Ingredient progress requires the authoritative store."),
+    );
+  },
+
   async startOver(command) {
     try {
       await storage.clearUserData(command.userId);
@@ -192,8 +260,10 @@ export const createWeeklyPlanGateway = (
 
 const legacyWeeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage);
 const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
+const ingredientProgressGateway = createIngredientProgressGateway(supabase);
 
 export const weeklyPlanGateway: WeeklyPlanGateway = {
   ...legacyWeeklyPlanGateway,
   getCurrent: authoritativeWeeklyPlanReader.getCurrent,
+  setIngredientChecked: ingredientProgressGateway.setIngredientChecked,
 };

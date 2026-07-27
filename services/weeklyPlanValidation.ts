@@ -20,6 +20,9 @@ const isNonNegativeNumber = (value: unknown): value is number =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(isNonEmptyString);
 
+const ingredientIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const isMacros = (value: unknown): value is MacroNutrients =>
   isRecord(value)
   && isNonNegativeNumber(value.calories)
@@ -27,23 +30,38 @@ const isMacros = (value: unknown): value is MacroNutrients =>
   && isNonNegativeNumber(value.carbs)
   && isNonNegativeNumber(value.fats);
 
-const isMeal = (value: unknown): value is Meal =>
-  isRecord(value)
-  && isNonEmptyString(value.name)
-  && isNonEmptyString(value.description)
-  && isStringArray(value.ingredients)
-  && value.ingredients.length > 0
-  && isStringArray(value.instructions)
-  && value.instructions.length > 0
-  && isMacros(value.macros)
-  && isNonNegativeNumber(value.cookingTimeMinutes)
-  && isNonNegativeNumber(value.prepTimeMinutes)
-  && (
-    value.portions === undefined
-    || value.portions === null
-    || (isNonNegativeNumber(value.portions) && value.portions > 0)
-  )
-  && (value.checkedIngredients === undefined || isStringArray(value.checkedIngredients));
+const isMeal = (value: unknown): value is Meal => {
+  if (!isRecord(value)
+    || !isNonEmptyString(value.name)
+    || !isNonEmptyString(value.description)
+    || !isStringArray(value.ingredients)
+    || value.ingredients.length === 0
+    || !isStringArray(value.ingredientIds)
+    || value.ingredientIds.length !== value.ingredients.length
+    || value.ingredientIds.some((identity) => !ingredientIdPattern.test(identity))
+    || new Set(value.ingredientIds).size !== value.ingredientIds.length
+    || !isStringArray(value.checkedIngredientIds)
+    || new Set(value.checkedIngredientIds).size !== value.checkedIngredientIds.length
+    || value.checkedIngredientIds.some(
+      (identity) => !(value.ingredientIds as string[]).includes(identity),
+    )
+    || !isStringArray(value.instructions)
+    || value.instructions.length === 0
+    || !isMacros(value.macros)
+    || !isNonNegativeNumber(value.cookingTimeMinutes)
+    || !isNonNegativeNumber(value.prepTimeMinutes)
+    || !(
+      value.portions === undefined
+      || value.portions === null
+      || (isNonNegativeNumber(value.portions) && value.portions > 0)
+    )
+    || (value.checkedIngredients !== undefined && !isStringArray(value.checkedIngredients))
+  ) {
+    return false;
+  }
+
+  return true;
+};
 
 export const isWeeklyPlan = (value: unknown): value is MealPlan => {
   if (!isRecord(value)
@@ -55,6 +73,7 @@ export const isWeeklyPlan = (value: unknown): value is MealPlan => {
   }
 
   const dayNames = new Set<string>();
+  const ingredientIds = new Set<string>();
   for (const day of value.days) {
     if (!isRecord(day)
       || !isNonEmptyString(day.day)
@@ -67,6 +86,12 @@ export const isWeeklyPlan = (value: unknown): value is MealPlan => {
       return false;
     }
     dayNames.add(day.day);
+    for (const meal of [day.breakfast, day.lunch, day.dinner, day.snack]) {
+      for (const ingredientId of meal.ingredientIds) {
+        if (ingredientIds.has(ingredientId)) return false;
+        ingredientIds.add(ingredientId);
+      }
+    }
   }
 
   return dayNames.size === 7;

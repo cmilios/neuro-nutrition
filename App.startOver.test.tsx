@@ -36,10 +36,14 @@ vi.mock("./services/storageService", () => ({
 }));
 
 vi.mock("./services/weeklyPlanGateway", () => ({
+  createWeeklyPlanInvalidationSubscription: vi.fn(() => ({
+    unsubscribe: vi.fn(),
+  })),
   weeklyPlanGateway: {
     getCurrent,
     createCurrent: vi.fn(),
     saveCurrent: vi.fn(),
+    setIngredientChecked: vi.fn(),
     startOver,
   },
 }));

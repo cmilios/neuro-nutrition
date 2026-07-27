@@ -53,6 +53,8 @@ export interface Meal {
   name: string;
   description: string;
   ingredients: string[];
+  ingredientIds: string[];
+  checkedIngredientIds: string[];
   instructions: string[];
   macros: MacroNutrients;
   cookingTimeMinutes: number;
@@ -102,6 +104,19 @@ export interface WeeklyPlanCommandOutcome {
   status: WeeklyPlanCommandStatus;
   result: AuthoritativeWeeklyPlanRow | null;
   error: WeeklyPlanCommandError | null;
+}
+
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+
+export interface IngredientProgressCommand {
+  commandId: string;
+  userId: string;
+  planId: string;
+  displayedRevision: number;
+  day: string;
+  mealType: MealType;
+  ingredientId: string;
+  checked: boolean;
 }
 
 export interface User {

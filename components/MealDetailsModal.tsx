@@ -6,9 +6,10 @@ interface MealDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   meal: Meal;
-  onToggleIngredient: (ingredient: string) => void;
+  onToggleIngredient: (ingredientId: string, checked: boolean) => void;
   mealType: string;
   isReadOnly?: boolean;
+  pendingIngredientIds?: string[];
 }
 
 const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ 
@@ -18,6 +19,7 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
   onToggleIngredient,
   mealType,
   isReadOnly = false,
+  pendingIngredientIds = [],
 }) => {
   // Prevent background scrolling when modal is open
   React.useEffect(() => {
@@ -30,7 +32,7 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const checkedIngredients = new Set(meal.checkedIngredients || []);
+  const checkedIngredientIds = new Set(meal.checkedIngredientIds);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -110,18 +112,25 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {meal.ingredients.map((ing, i) => {
-                const isChecked = checkedIngredients.has(ing);
+                const ingredientId = meal.ingredientIds[i];
+                const isChecked = checkedIngredientIds.has(ingredientId);
+                const isPending = pendingIngredientIds.includes(ingredientId);
                 return (
-                  <div 
-                    key={i} 
-                    onClick={() => {
-                      if (!isReadOnly) onToggleIngredient(ing);
-                    }}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-label={ing}
+                    aria-checked={isChecked}
+                    aria-busy={isPending}
+                    disabled={isReadOnly || isPending}
+                    key={ingredientId}
+                    onClick={() => onToggleIngredient(ingredientId, !isChecked)}
                     className={`
-                      flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all select-none
+                      flex items-center gap-3 p-3 rounded-lg border text-left transition-all select-none
                       ${isChecked 
                         ? 'bg-emerald-50 border-emerald-200 text-slate-400 line-through decoration-emerald-500/50' 
                         : 'bg-white border-slate-200 hover:border-emerald-300 text-slate-700 hover:shadow-sm'}
+                      ${isPending ? 'cursor-wait opacity-70' : 'cursor-pointer'}
                     `}
                   >
                     {isChecked ? (
@@ -130,7 +139,8 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
                       <Square className="text-slate-300 shrink-0" size={20} />
                     )}
                     <span className="text-sm font-medium">{ing}</span>
-                  </div>
+                    {isPending && <span className="sr-only">Saving</span>}
+                  </button>
                 );
               })}
             </div>

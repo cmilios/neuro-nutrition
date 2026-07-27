@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MealPlan, DayPlan, Meal } from '../types';
+import { MealPlan, Meal, MealType } from '../types';
 import { Flame, Droplet, Wheat, Dumbbell, Clock, ChefHat, RefreshCw } from 'lucide-react';
 import MealDetailsModal from './MealDetailsModal';
 
@@ -8,7 +8,13 @@ interface PlanDashboardProps {
   onReroll: (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => void;
   rerollingState: { dayIndex: number; mealType: string } | null;
   rerollRetry: { dayIndex: number; mealType: string } | null;
-  onToggleIngredient: (dayIndex: number, mealType: string, ingredient: string) => void;
+  onToggleIngredient: (
+    dayIndex: number,
+    mealType: MealType,
+    ingredientId: string,
+    checked: boolean,
+  ) => void;
+  pendingIngredientIds?: string[];
   isReadOnly?: boolean;
 }
 
@@ -18,10 +24,14 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
   rerollingState,
   rerollRetry,
   onToggleIngredient,
+  pendingIngredientIds = [],
   isReadOnly = false,
 }) => {
   const [activeDayIndex, setActiveDayIndex] = useState(0);
-  const [selectedMeal, setSelectedMeal] = useState<{ dayIndex: number, type: string, meal: Meal } | null>(null);
+  const [selectedMeal, setSelectedMeal] = useState<{
+    dayIndex: number;
+    type: MealType;
+  } | null>(null);
 
   useEffect(() => {
     if (activeDayIndex >= plan.days.length) setActiveDayIndex(0);
@@ -42,26 +52,23 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
   const canRetry = (type: string) =>
     rerollRetry?.dayIndex === activeDayIndex && rerollRetry?.mealType === type;
 
-  const handleMealClick = (type: string, meal: Meal) => {
-    setSelectedMeal({ dayIndex: activeDayIndex, type, meal });
+  const handleMealClick = (type: MealType) => {
+    setSelectedMeal({ dayIndex: activeDayIndex, type });
   };
 
-  const handleModalIngredientToggle = (ingredient: string) => {
+  const handleModalIngredientToggle = (ingredientId: string, checked: boolean) => {
     if (!selectedMeal || isReadOnly) return;
-    
-    // Optimistic UI update for the modal
-    const updatedMeal = { ...selectedMeal.meal };
-    const currentChecked = updatedMeal.checkedIngredients || [];
-    
-    if (currentChecked.includes(ingredient)) {
-      updatedMeal.checkedIngredients = currentChecked.filter(i => i !== ingredient);
-    } else {
-      updatedMeal.checkedIngredients = [...currentChecked, ingredient];
-    }
-    
-    setSelectedMeal({ ...selectedMeal, meal: updatedMeal });
-    onToggleIngredient(selectedMeal.dayIndex, selectedMeal.type.toLowerCase(), ingredient);
+    onToggleIngredient(
+      selectedMeal.dayIndex,
+      selectedMeal.type,
+      ingredientId,
+      checked,
+    );
   };
+
+  const selectedMealValue = selectedMeal
+    ? plan.days[selectedMeal.dayIndex]?.[selectedMeal.type]
+    : null;
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -107,7 +114,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           isLoading={isRerolling('breakfast')}
           canRetry={canRetry('breakfast')}
           isReadOnly={isReadOnly}
-          onClick={() => handleMealClick('Breakfast', activeDay.breakfast)}
+          onClick={() => handleMealClick('breakfast')}
         />
         <MealCard 
           type="Lunch" 
@@ -117,7 +124,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           isLoading={isRerolling('lunch')}
           canRetry={canRetry('lunch')}
           isReadOnly={isReadOnly}
-          onClick={() => handleMealClick('Lunch', activeDay.lunch)}
+          onClick={() => handleMealClick('lunch')}
         />
         <MealCard 
           type="Dinner" 
@@ -127,7 +134,7 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           isLoading={isRerolling('dinner')}
           canRetry={canRetry('dinner')}
           isReadOnly={isReadOnly}
-          onClick={() => handleMealClick('Dinner', activeDay.dinner)}
+          onClick={() => handleMealClick('dinner')}
         />
         <MealCard 
           type="Snack" 
@@ -137,19 +144,20 @@ const PlanDashboard: React.FC<PlanDashboardProps> = ({
           isLoading={isRerolling('snack')}
           canRetry={canRetry('snack')}
           isReadOnly={isReadOnly}
-          onClick={() => handleMealClick('Snack', activeDay.snack)}
+          onClick={() => handleMealClick('snack')}
         />
       </div>
 
       {/* Details Modal */}
-      {selectedMeal && (
+      {selectedMeal && selectedMealValue && (
         <MealDetailsModal 
           isOpen={!!selectedMeal}
           onClose={() => setSelectedMeal(null)}
-          meal={selectedMeal.meal}
+          meal={selectedMealValue}
           mealType={selectedMeal.type}
           onToggleIngredient={handleModalIngredientToggle}
           isReadOnly={isReadOnly}
+          pendingIngredientIds={pendingIngredientIds}
         />
       )}
     </div>

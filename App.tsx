@@ -8,7 +8,16 @@ import LoadingView from './components/LoadingView';
 import AuthScreen from './components/AuthScreen';
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
-import { UserProfile, MealPlan, User, DayPlan, Meal, MealFeedback, Milestone } from './types';
+import {
+  AuthoritativeWeeklyPlanRow,
+  UserProfile,
+  MealPlan,
+  User,
+  Meal,
+  MealFeedback,
+  Milestone,
+  MealType,
+} from './types';
 import {
   generateInitialWeeklyPlan,
   generateMealPlan,
@@ -16,7 +25,10 @@ import {
 } from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
-import { weeklyPlanGateway } from './services/weeklyPlanGateway';
+import {
+  createWeeklyPlanInvalidationSubscription,
+  weeklyPlanGateway,
+} from './services/weeklyPlanGateway';
 import { weeklyPlanCache } from './services/weeklyPlanCache';
 import { requireAuthoritativeWeeklyPlanRow } from './services/weeklyPlanValidation';
 import { supabase } from './services/supabaseClient';
@@ -32,6 +44,8 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
+  const [authoritativePlan, setAuthoritativePlan] =
+    useState<AuthoritativeWeeklyPlanRow | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
   // Track the currently loaded user ID to avoid stale closures in effects
@@ -40,6 +54,8 @@ const App: React.FC = () => {
     commandId: string;
     normalizedProfile: string;
   } | null>(null);
+  const authoritativePlanRef = React.useRef<AuthoritativeWeeklyPlanRow | null>(null);
+  const requestPlanRefetchRef = React.useRef<(() => void) | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +74,7 @@ const App: React.FC = () => {
     currentPlan: MealPlan;
     reviewType: 'empty' | 'partial';
   } | null>(null);
+  const [pendingIngredientIds, setPendingIngredientIds] = useState<string[]>([]);
 
   // Navigation State
   const [currentView, setCurrentView] = useState<'plan' | 'performance'>('plan');
@@ -78,6 +95,26 @@ const App: React.FC = () => {
 
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error && err.message ? err.message : fallback;
+
+  const applyAuthoritativePlan = (
+    row: AuthoritativeWeeklyPlanRow,
+    userId: string,
+  ) => {
+    const validated = requireAuthoritativeWeeklyPlanRow(row, userId);
+    authoritativePlanRef.current = validated;
+    setAuthoritativePlan(validated);
+    weeklyPlanCache.set(userId, validated);
+    setMealPlan(validated.document);
+    setPlanAuthorityStatus('synchronized');
+    return validated;
+  };
+
+  const clearAuthoritativePlan = (userId: string) => {
+    authoritativePlanRef.current = null;
+    setAuthoritativePlan(null);
+    weeklyPlanCache.clear(userId);
+    setMealPlan(null);
+  };
 
   const saveCurrentWeeklyPlan = async (userId: string, document: MealPlan) => {
     const outcome = await weeklyPlanGateway.saveCurrent({
@@ -104,11 +141,14 @@ const App: React.FC = () => {
 
       if (!nextUser) {
         loadedUserIdRef.current = null;
+        authoritativePlanRef.current = null;
+        setAuthoritativePlan(null);
         setProfile(null);
         setMealPlan(null);
         setMilestones([]);
         setNextWeekRetry(null);
         setRerollRetry(null);
+        setPendingIngredientIds([]);
         initialGenerationCommandRef.current = null;
         setPlanAuthorityStatus('checking');
       }
@@ -149,6 +189,8 @@ const App: React.FC = () => {
     setIsDataLoading(true);
     setPlanAuthorityStatus('checking');
     setProfile(null);
+    authoritativePlanRef.current = cachedPlan;
+    setAuthoritativePlan(cachedPlan);
     setMealPlan(cachedPlan?.document ?? null);
     setMilestones([]);
 
@@ -156,6 +198,8 @@ const App: React.FC = () => {
       console.error('Failed to load Current Weekly Plan:', loadError);
       if (cancelled) return;
       setPlanAuthorityStatus(cachedPlan ? 'stale' : 'unavailable');
+      authoritativePlanRef.current = cachedPlan;
+      setAuthoritativePlan(cachedPlan);
       setMealPlan(cachedPlan?.document ?? null);
     };
 
@@ -175,16 +219,12 @@ const App: React.FC = () => {
         if (cancelled || loadedUserIdRef.current !== user.id) return;
         try {
           if (!currentPlan) {
-            weeklyPlanCache.clear(user.id);
-            setMealPlan(null);
+            clearAuthoritativePlan(user.id);
             setPlanAuthorityStatus('confirmed-empty');
             return;
           }
 
-          const validated = requireAuthoritativeWeeklyPlanRow(currentPlan, user.id);
-          weeklyPlanCache.set(user.id, validated);
-          setMealPlan(validated.document);
-          setPlanAuthorityStatus('synchronized');
+          applyAuthoritativePlan(currentPlan, user.id);
         } catch (loadError) {
           useCachedPlanFallback(loadError);
         }
@@ -199,6 +239,85 @@ const App: React.FC = () => {
     };
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    let refetchTimer: ReturnType<typeof setTimeout> | null = null;
+    let refetchInFlight = false;
+    let refetchQueued = false;
+
+    const refetchCurrentPlan = async () => {
+      if (refetchInFlight) {
+        refetchQueued = true;
+        return;
+      }
+
+      refetchInFlight = true;
+      try {
+        const currentPlan = await weeklyPlanGateway.getCurrent(user.id);
+        if (cancelled) return;
+        if (!currentPlan) {
+          clearAuthoritativePlan(user.id);
+          setPlanAuthorityStatus('confirmed-empty');
+          return;
+        }
+        applyAuthoritativePlan(currentPlan, user.id);
+      } catch (refetchError) {
+        console.error('Failed to refetch Current Weekly Plan:', refetchError);
+        if (!cancelled) {
+          setPlanAuthorityStatus(
+            authoritativePlanRef.current ? 'stale' : 'unavailable',
+          );
+        }
+      } finally {
+        refetchInFlight = false;
+        if (!cancelled && refetchQueued) {
+          refetchQueued = false;
+          void refetchCurrentPlan();
+        }
+      }
+    };
+
+    const scheduleRefetch = () => {
+      if (cancelled) return;
+      setPlanAuthorityStatus(
+        authoritativePlanRef.current ? 'stale' : 'checking',
+      );
+      if (refetchTimer || refetchInFlight) {
+        refetchQueued = refetchInFlight;
+        return;
+      }
+      refetchTimer = setTimeout(() => {
+        refetchTimer = null;
+        void refetchCurrentPlan();
+      }, 20);
+    };
+
+    requestPlanRefetchRef.current = scheduleRefetch;
+    const subscription = createWeeklyPlanInvalidationSubscription(
+      supabase,
+      user.id,
+      scheduleRefetch,
+      (status) => {
+        if (status === 'connected') {
+          scheduleRefetch();
+          return;
+        }
+        setPlanAuthorityStatus(
+          authoritativePlanRef.current ? 'stale' : 'unavailable',
+        );
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      requestPlanRefetchRef.current = null;
+      if (refetchTimer) clearTimeout(refetchTimer);
+      subscription.unsubscribe();
+    };
+  }, [user?.id]);
+
   const handleAuthSuccess = (authenticatedUser: User) => {
     setUser(authenticatedUser);
   };
@@ -207,12 +326,15 @@ const App: React.FC = () => {
     try {
       await authService.logout();
       loadedUserIdRef.current = null;
+      authoritativePlanRef.current = null;
+      setAuthoritativePlan(null);
       setUser(null);
       setProfile(null);
       setMealPlan(null);
       setMilestones([]);
       setNextWeekRetry(null);
       setRerollRetry(null);
+      setPendingIngredientIds([]);
       initialGenerationCommandRef.current = null;
       setPlanAuthorityStatus('checking');
     } catch (logoutError) {
@@ -250,11 +372,8 @@ const App: React.FC = () => {
         throw new Error('The generation command did not return a Current Weekly Plan.');
       }
 
-      const authoritative = requireAuthoritativeWeeklyPlanRow(outcome.result, user.id);
       initialGenerationCommandRef.current = null;
-      weeklyPlanCache.set(user.id, authoritative);
-      setMealPlan(authoritative.document);
-      setPlanAuthorityStatus('synchronized');
+      applyAuthoritativePlan(outcome.result, user.id);
       try {
         await storageService.saveProfileData(user.id, data, milestones);
       } catch (profileSaveError) {
@@ -360,37 +479,67 @@ const App: React.FC = () => {
     }
   };
 
-  const handleToggleIngredient = async (dayIndex: number, mealType: string, ingredient: string) => {
-    if (!user || !profile || !mealPlan || planAuthorityStatus !== 'synchronized') return;
-
-    const updatedDays = [...mealPlan.days];
-    const targetDay = { ...updatedDays[dayIndex] };
-
-    const meal = targetDay[mealType as keyof DayPlan] as Meal;
-
-    if (meal && typeof meal === 'object') {
-      const currentChecked = meal.checkedIngredients || [];
-      const checkedIngredients = currentChecked.includes(ingredient)
-        ? currentChecked.filter(i => i !== ingredient)
-        : [...currentChecked, ingredient];
-
-      // Clone the meal instead of mutating the existing React state object.
-      targetDay[mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack'] = {
-        ...meal,
-        checkedIngredients,
-      };
+  const handleToggleIngredient = async (
+    dayIndex: number,
+    mealType: MealType,
+    ingredientId: string,
+    checked: boolean,
+  ) => {
+    if (!user
+      || !profile
+      || !mealPlan
+      || !authoritativePlan
+      || planAuthorityStatus !== 'synchronized'
+      || pendingIngredientIds.includes(ingredientId)
+    ) {
+      return;
     }
 
-    updatedDays[dayIndex] = targetDay;
+    const day = mealPlan.days[dayIndex];
+    if (!day || !day[mealType].ingredientIds.includes(ingredientId)) return;
 
-    const updatedPlan = { ...mealPlan, days: updatedDays };
-    setMealPlan(updatedPlan);
+    setPendingIngredientIds((current) => [...current, ingredientId]);
+    setError(null);
     try {
-      await saveCurrentWeeklyPlan(user.id, updatedPlan);
+      const outcome = await weeklyPlanGateway.setIngredientChecked({
+        commandId: crypto.randomUUID(),
+        userId: user.id,
+        planId: authoritativePlan.planId,
+        displayedRevision: authoritativePlan.revision,
+        day: day.day,
+        mealType,
+        ingredientId,
+        checked,
+      });
+      if (outcome.status !== 'succeeded' || !outcome.result) {
+        if (['stale_plan', 'no_current_plan', 'ingredient_not_found']
+          .includes(outcome.error?.code ?? '')) {
+          setPlanAuthorityStatus('stale');
+          requestPlanRefetchRef.current?.();
+        }
+        throw new Error(
+          outcome.error?.message || 'The ingredient progress command did not succeed.',
+        );
+      }
+
+      const latestConfirmed = authoritativePlanRef.current;
+      if (latestConfirmed
+        && (
+          outcome.result.planId !== latestConfirmed.planId
+          || outcome.result.revision < latestConfirmed.revision
+        )
+      ) {
+        requestPlanRefetchRef.current?.();
+      } else {
+        applyAuthoritativePlan(outcome.result, user.id);
+      }
     } catch (saveError) {
       console.error('Failed to save ingredient state:', saveError);
-      setMealPlan(mealPlan);
       setError('Could not save that ingredient change. Please try again.');
+    } finally {
+      setPendingIngredientIds((current) =>
+        current.filter((identity) => identity !== ingredientId)
+      );
     }
   };
 
@@ -565,6 +714,7 @@ const App: React.FC = () => {
                 rerollingState={rerollingState}
                 rerollRetry={rerollRetry}
                 onToggleIngredient={handleToggleIngredient}
+                pendingIngredientIds={pendingIngredientIds}
                 isReadOnly={planIsReadOnly}
               />
             ) : currentView === 'performance' ? (
