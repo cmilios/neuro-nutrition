@@ -104,6 +104,11 @@ export const isAuthoritativeWeeklyPlanRow = (
   value: unknown,
   expectedUserId?: string,
 ): value is AuthoritativeWeeklyPlanRow => {
+  const hasGenerationLockFields = isRecord(value)
+    && (
+      value.nextGenerationId !== undefined
+      || value.nextGenerationLockedAt !== undefined
+    );
   if (!isRecord(value)
     || !isNonEmptyString(value.planId)
     || !isNonEmptyString(value.userId)
@@ -117,6 +122,15 @@ export const isAuthoritativeWeeklyPlanRow = (
     || !isNonEmptyString(value.updatedAt)
     || !isNullableString(value.predecessorPlanId)
     || !isNullableString(value.generationId)
+    || (
+      hasGenerationLockFields
+      && (
+        !isNullableString(value.nextGenerationId)
+        || !isNullableString(value.nextGenerationLockedAt)
+        || ((value.nextGenerationId === null) !==
+          (value.nextGenerationLockedAt === null))
+      )
+    )
   ) {
     return false;
   }

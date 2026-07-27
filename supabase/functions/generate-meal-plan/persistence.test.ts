@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GenerationRecord } from "./handler";
 import {
   createInitialGenerationCommandStore,
+  createNextWeeklyPlanCommandStore,
   persistUsageRecordToSupabase,
 } from "./persistence";
 
@@ -205,5 +206,45 @@ describe("initial generation command persistence", () => {
     }));
     expect(JSON.stringify(body)).not.toContain("profile");
     expect(JSON.stringify(body)).not.toContain("ingredient");
+  });
+});
+
+describe("Next Weekly Plan command persistence", () => {
+  it("passes source authority to the begin transaction", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "in_progress",
+      result: null,
+      error: null,
+      shouldGenerate: true,
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createNextWeeklyPlanCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.begin({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+      inputFingerprint: "a".repeat(64),
+      sourcePlanId: "20000000-0000-4000-8000-000000000001",
+      sourceRevision: 3,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/begin_next_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: "00000000-0000-4000-8000-000000000001",
+          p_command_id: outcome.commandId,
+          p_input_fingerprint: "a".repeat(64),
+          p_source_plan_id: "20000000-0000-4000-8000-000000000001",
+          p_source_revision: 3,
+        }),
+      }),
+    );
   });
 });

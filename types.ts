@@ -89,6 +89,8 @@ export interface AuthoritativeWeeklyPlanRow {
   deactivatedAt: string | null;
   predecessorPlanId: string | null;
   generationId: string | null;
+  nextGenerationId?: string | null;
+  nextGenerationLockedAt?: string | null;
 }
 
 export type WeeklyPlanCommandStatus = 'succeeded' | 'in_progress' | 'failed';
@@ -125,6 +127,15 @@ export interface MealRerollCommand {
   displayedRevision: number;
   day: string;
   mealType: MealType;
+}
+
+export interface NextWeeklyPlanCommand {
+  commandId: string;
+  displayedPlanId: string;
+  displayedRevision: number;
+  feedback: MealFeedback[];
+  currentPlan: MealPlan;
+  reviewType: 'empty' | 'partial';
 }
 
 export interface MealRerollReservation {

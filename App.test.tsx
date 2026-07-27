@@ -3,6 +3,33 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { weeklyPlanFixture } from "./test/weeklyPlanFixture";
 
+const nextGenerationSuccess = (
+  document: typeof weeklyPlanFixture,
+  commandId: string,
+) => ({
+  data: {
+    commandId,
+    status: "succeeded",
+    result: {
+      planId: "00000000-0000-4000-8000-000000000030",
+      userId: "user-1",
+      document,
+      schemaVersion: 1,
+      revision: 0,
+      isActive: true,
+      createdAt: "2026-07-27T11:00:00.000Z",
+      updatedAt: "2026-07-27T11:00:00.000Z",
+      deactivatedAt: null,
+      predecessorPlanId: "00000000-0000-4000-8000-000000000010",
+      generationId: commandId,
+      nextGenerationId: null,
+      nextGenerationLockedAt: null,
+    },
+    error: null,
+  },
+  error: null,
+});
+
 const {
   edgeFunctionInvoke,
   getProfileData,
@@ -719,7 +746,9 @@ describe("application generation flow", () => {
       mealPlan: weeklyPlanFixture,
       milestones: [],
     });
-    edgeFunctionInvoke.mockResolvedValue({ data: { data: weeklyPlanFixture }, error: null });
+    edgeFunctionInvoke.mockImplementation(async (_name, { body }) =>
+      nextGenerationSuccess(weeklyPlanFixture, body.commandId)
+    );
     const user = userEvent.setup();
     render(<App />);
 
@@ -748,7 +777,9 @@ describe("application generation flow", () => {
     });
     const convergedPlan = structuredClone(weeklyPlanFixture);
     convergedPlan.days[0].breakfast.name = "Converged Partial Breakfast";
-    edgeFunctionInvoke.mockResolvedValue({ data: { data: convergedPlan }, error: null });
+    edgeFunctionInvoke.mockImplementation(async (_name, { body }) =>
+      nextGenerationSuccess(convergedPlan, body.commandId)
+    );
     const user = userEvent.setup();
     render(<App />);
 
@@ -767,10 +798,7 @@ describe("application generation flow", () => {
     expect(request.feedback.slice(1)).toEqual(expect.arrayContaining([
       expect.objectContaining({ cooked: false, liked: false }),
     ]));
-    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "user-1",
-      document: convergedPlan,
-    }));
+    expect(saveCurrent).not.toHaveBeenCalled();
   });
 
   it("preserves the current plan and reuses the Empty Meal Review request through Try Again", async () => {
@@ -791,7 +819,9 @@ describe("application generation flow", () => {
         data: null,
         error: { message: "A valid Next Weekly Plan was not created. Your current plan is unchanged." },
       })
-      .mockResolvedValueOnce({ data: { data: nextPlan }, error: null });
+      .mockImplementationOnce(async (_name, { body }) =>
+        nextGenerationSuccess(nextPlan, body.commandId)
+      );
     const user = userEvent.setup();
     render(<App />);
 
@@ -814,10 +844,7 @@ describe("application generation flow", () => {
     expect(await screen.findByText("Next Week Breakfast")).toBeInTheDocument();
     expect(edgeFunctionInvoke.mock.calls[1][1]).toEqual(firstRequest);
     expect(screen.getByRole("button", { name: "Next Week" })).toBeInTheDocument();
-    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "user-1",
-      document: nextPlan,
-    }));
+    expect(saveCurrent).not.toHaveBeenCalled();
   });
 
   it("clears terminal retry state when the application session is refreshed", async () => {

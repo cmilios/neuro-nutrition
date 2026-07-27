@@ -65,6 +65,7 @@ export interface GenerateMealPlanDependencies {
   generate(request: GenerationRequest): Promise<GenerationResult>;
   persist(record: GenerationRecord): Promise<void>;
   initialGeneration?: InitialGenerationCommandStore;
+  nextGeneration?: NextWeeklyPlanCommandStore;
   mealReroll?: MealRerollCommandStore;
 }
 
@@ -92,6 +93,41 @@ export interface MealRerollTarget {
 
 export interface MealRerollCommandOutcome extends InitialGenerationCommandOutcome {
   target?: MealRerollTarget | null;
+}
+
+export interface NextWeeklyPlanSource {
+  planId: string;
+  revision: number;
+  document: WeeklyPlan;
+}
+
+export interface NextWeeklyPlanCommandOutcome extends InitialGenerationCommandOutcome {
+  source?: NextWeeklyPlanSource | null;
+}
+
+export interface NextWeeklyPlanCommandStore {
+  begin(
+    identity: InitialGenerationCommandIdentity & {
+      sourcePlanId: string;
+      sourceRevision: number;
+    },
+  ): Promise<NextWeeklyPlanCommandOutcome>;
+  checkpoint(
+    command: InitialGenerationCommandIdentity & {
+      checkpoint: InitialGenerationCheckpoint;
+    },
+  ): Promise<NextWeeklyPlanCommandOutcome>;
+  complete(
+    command: InitialGenerationCommandIdentity & { document: unknown },
+  ): Promise<NextWeeklyPlanCommandOutcome>;
+  fail(
+    command: InitialGenerationCommandIdentity & {
+      errorCode: string;
+      errorMessage: string;
+      retryable: boolean;
+      evidence: Record<string, unknown>;
+    },
+  ): Promise<NextWeeklyPlanCommandOutcome>;
 }
 
 export interface MealRerollCommandStore {
@@ -240,11 +276,29 @@ async function fingerprintMealReroll(request: GenerationRequest): Promise<string
   return sha256Hex(normalized);
 }
 
-const commandResponse = (outcome: MealRerollCommandOutcome) => {
+async function fingerprintNextGeneration(request: GenerationRequest): Promise<string> {
+  const normalized = JSON.stringify(normalizeForFingerprint({
+    operation: "generate_next",
+    profile: request.profile,
+    feedback: request.feedback,
+    reviewType: request.reviewType,
+    displayedPlanId: request.displayedPlanId,
+    displayedRevision: request.displayedRevision,
+  }));
+  return sha256Hex(normalized);
+}
+
+const commandResponse = (
+  outcome: InitialGenerationCommandOutcome & {
+    target?: MealRerollTarget | null;
+    source?: NextWeeklyPlanSource | null;
+  },
+) => {
   const {
     shouldGenerate: _shouldGenerate,
     checkpoint: _checkpoint,
     target: _target,
+    source: _source,
     ...response
   } = outcome;
   return response;
@@ -531,6 +585,202 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           },
         });
         return await finalizeCheckpoint(checkpointed);
+      }
+
+      const isDurableNextGeneration =
+        generationRequest.action === "plan" &&
+        (generationRequest.reviewType === "empty" ||
+          generationRequest.reviewType === "partial") &&
+        dependencies.nextGeneration;
+      if (isDurableNextGeneration) {
+        if (
+          typeof generationRequest.commandId !== "string" ||
+          !commandIdPattern.test(generationRequest.commandId) ||
+          typeof generationRequest.displayedPlanId !== "string" ||
+          !commandIdPattern.test(generationRequest.displayedPlanId) ||
+          typeof generationRequest.displayedRevision !== "number" ||
+          !Number.isInteger(generationRequest.displayedRevision) ||
+          generationRequest.displayedRevision < 0
+        ) {
+          throw new HttpError(
+            "A valid Next Weekly Plan command is required.",
+            400,
+            "invalid_command",
+          );
+        }
+
+        const identity = {
+          commandId: generationRequest.commandId,
+          userId: user.id,
+          inputFingerprint: await fingerprintNextGeneration(generationRequest),
+        };
+        const finalizeCheckpoint = async (
+          outcome: NextWeeklyPlanCommandOutcome,
+        ): Promise<Response> => {
+          const checkpoint = outcome.checkpoint;
+          if (!checkpoint) return json(commandResponse(outcome));
+
+          const usagePersisted = await persistAndReport(
+            user!,
+            generationRequest!,
+            checkpoint.usageRecord,
+          );
+          if (!usagePersisted) {
+            throw new HttpError(
+              "The provider attempt is awaiting durable reconciliation.",
+              503,
+              "usage_persistence_failed",
+            );
+          }
+          if (checkpoint.kind === "unknown") {
+            throw new HttpError(
+              "The provider outcome is unknown and requires reconciliation.",
+              503,
+              "generation_outcome_unknown",
+            );
+          }
+          if (checkpoint.kind === "failure") {
+            const failed = await dependencies.nextGeneration!.fail({
+              ...identity,
+              errorCode: checkpoint.error.code,
+              errorMessage: checkpoint.error.message,
+              retryable: checkpoint.error.retryable,
+              evidence: checkpoint.evidence,
+            });
+            return json(commandResponse(failed));
+          }
+
+          const completed = await dependencies.nextGeneration!.complete({
+            ...identity,
+            document: checkpoint.document,
+          });
+          return json(commandResponse(completed));
+        };
+
+        const started = await dependencies.nextGeneration.begin({
+          ...identity,
+          sourcePlanId: generationRequest.displayedPlanId,
+          sourceRevision: generationRequest.displayedRevision,
+        });
+        if (!started.shouldGenerate) {
+          return await finalizeCheckpoint(started);
+        }
+        if (!started.source) {
+          const failed = await dependencies.nextGeneration.fail({
+            ...identity,
+            errorCode: "generation_lock_lost",
+            errorMessage: "The locked Current Weekly Plan is unavailable.",
+            retryable: true,
+            evidence: { stage: "start", reason: "source_missing" },
+          });
+          return json(commandResponse(failed));
+        }
+
+        let validationDetails: string[] | undefined;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          let result: GenerationResult;
+          try {
+            result = await dependencies.generate({
+              ...generationRequest,
+              currentPlan: started.source.document,
+              attempt,
+              validationDetails,
+            });
+          } catch (error) {
+            if (error instanceof ProviderGenerationError) {
+              const checkpointed = await dependencies.nextGeneration.checkpoint({
+                ...identity,
+                checkpoint: {
+                  kind: error.outcomeUnknown ? "unknown" : "failure",
+                  usageRecord: error.usageRecord,
+                  error: {
+                    code: error.outcomeUnknown
+                      ? "generation_outcome_unknown"
+                      : "generation_failed",
+                    message: error.outcomeUnknown
+                      ? "The provider outcome is unknown and requires reconciliation."
+                      : "A valid Next Weekly Plan was not created.",
+                    retryable: !error.outcomeUnknown,
+                  },
+                  evidence: {
+                    stage: "provider",
+                    reason: error.code,
+                    callId: error.usageRecord.callId,
+                    attempt: error.usageRecord.attempt,
+                    providerRequestId: error.usageRecord.providerRequestId,
+                    providerResponseId: error.usageRecord.providerResponseId,
+                  },
+                },
+              });
+              return await finalizeCheckpoint(checkpointed);
+            }
+
+            const failed = await dependencies.nextGeneration.fail({
+              ...identity,
+              errorCode: "generation_failed",
+              errorMessage: "A valid Next Weekly Plan was not created.",
+              retryable: true,
+              evidence: {
+                stage: "generation",
+                reason: error instanceof HttpError ? error.code : "unexpected_error",
+              },
+            });
+            return json(commandResponse(failed));
+          }
+
+          try {
+            const assembledPlan = validateNextWeeklyPlan(
+              started.source.document,
+              result.data,
+              generationRequest.feedback,
+              generationRequest.reviewType,
+            );
+            const checkpointed = await dependencies.nextGeneration.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: "success",
+                document: assembledPlan,
+                usageRecord: result.usageRecord,
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          } catch (error) {
+            if (!(error instanceof NextWeeklyPlanValidationError)) throw error;
+            validationDetails = error.codes;
+            const failedUsage = {
+              ...result.usageRecord,
+              outcome: "failure" as const,
+              validationCodes: error.codes,
+              errorCode: "invalid_next_weekly_plan",
+            };
+            if (attempt < 2) {
+              await persistAndReport(user, generationRequest, failedUsage);
+              continue;
+            }
+
+            const checkpointed = await dependencies.nextGeneration.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: "failure",
+                usageRecord: failedUsage,
+                error: {
+                  code: "invalid_next_weekly_plan",
+                  message: "A valid Next Weekly Plan was not created.",
+                  retryable: true,
+                },
+                evidence: {
+                  stage: "validation",
+                  reason: "invalid_next_weekly_plan",
+                  callId: failedUsage.callId,
+                  attempt: failedUsage.attempt,
+                  providerRequestId: failedUsage.providerRequestId,
+                  providerResponseId: failedUsage.providerResponseId,
+                },
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          }
+        }
       }
 
       const isDurableMealReroll =

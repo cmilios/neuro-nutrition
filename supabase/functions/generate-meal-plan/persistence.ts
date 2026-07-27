@@ -3,6 +3,8 @@ import type {
   InitialGenerationCommandOutcome,
   InitialGenerationCommandStore,
   MealRerollCommandStore,
+  NextWeeklyPlanCommandOutcome,
+  NextWeeklyPlanCommandStore,
 } from "./handler.ts";
 
 interface PersistenceOptions {
@@ -215,4 +217,72 @@ export function createMealRerollCommandStore(
       });
     },
   } as MealRerollCommandStore;
+}
+
+export function createNextWeeklyPlanCommandStore(
+  options: CommandPersistenceOptions,
+): NextWeeklyPlanCommandStore {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const rpc = async (
+    functionName: string,
+    body: Record<string, unknown>,
+  ): Promise<NextWeeklyPlanCommandOutcome> => {
+    const response = await fetchImpl(
+      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: options.serviceRoleKey,
+          Authorization: `Bearer ${options.serviceRoleKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Next Weekly Plan command ${functionName} failed with HTTP ${response.status}`,
+      );
+    }
+    return await response.json() as NextWeeklyPlanCommandOutcome;
+  };
+
+  return {
+    begin(identity) {
+      return rpc("begin_next_weekly_plan_generation", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+        p_input_fingerprint: identity.inputFingerprint,
+        p_source_plan_id: identity.sourcePlanId,
+        p_source_revision: identity.sourceRevision,
+      });
+    },
+    checkpoint(command) {
+      return rpc("checkpoint_next_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_checkpoint: command.checkpoint,
+      });
+    },
+    complete(command) {
+      return rpc("complete_next_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_document: command.document,
+      });
+    },
+    fail(command) {
+      return rpc("fail_next_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_error_code: command.errorCode,
+        p_error_message: command.errorMessage,
+        p_retryable: command.retryable,
+        p_failure_evidence: command.evidence,
+      });
+    },
+  };
 }

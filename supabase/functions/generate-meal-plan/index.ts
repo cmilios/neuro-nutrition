@@ -23,6 +23,7 @@ import { createOpenAIUsageRecord } from "./usage.ts";
 import {
   createInitialGenerationCommandStore,
   createMealRerollCommandStore,
+  createNextWeeklyPlanCommandStore,
   persistUsageRecordToSupabase,
 } from "./persistence.ts";
 
@@ -598,6 +599,10 @@ const handler = createGenerateMealPlanHandler({
   generate,
   persist: persistUsageRecord,
   initialGeneration: createInitialGenerationCommandStore({
+    supabaseUrl,
+    serviceRoleKey,
+  }),
+  nextGeneration: createNextWeeklyPlanCommandStore({
     supabaseUrl,
     serviceRoleKey,
   }),

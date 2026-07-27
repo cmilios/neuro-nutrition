@@ -17,10 +17,11 @@ import {
   MealFeedback,
   Milestone,
   MealType,
+  NextWeeklyPlanCommand,
 } from './types';
 import {
   generateInitialWeeklyPlan,
-  generateMealPlan,
+  generateNextWeeklyPlan,
   rerollMeal,
 } from './services/aiService';
 import { authService } from './services/authService';
@@ -56,6 +57,7 @@ const App: React.FC = () => {
   } | null>(null);
   const authoritativePlanRef = React.useRef<AuthoritativeWeeklyPlanRow | null>(null);
   const requestPlanRefetchRef = React.useRef<(() => void) | null>(null);
+  const reconcilingNextGenerationIdRef = React.useRef<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,11 +73,12 @@ const App: React.FC = () => {
   } | null>(null);
   const [pendingMealRerolls, setPendingMealRerolls] =
     useState<MealRerollReservation[]>([]);
-  const [nextWeekRetry, setNextWeekRetry] = useState<{
-    feedback: MealFeedback[];
-    currentPlan: MealPlan;
-    reviewType: 'empty' | 'partial';
+  const [nextWeekRetry, setNextWeekRetry] = useState<
+    Omit<NextWeeklyPlanCommand, 'commandId'> & {
+    commandId: string | null;
   } | null>(null);
+  const [pendingNextGenerationId, setPendingNextGenerationId] =
+    useState<string | null>(null);
   const [pendingIngredientIds, setPendingIngredientIds] = useState<string[]>([]);
 
   // Navigation State
@@ -103,11 +106,37 @@ const App: React.FC = () => {
     userId: string,
   ) => {
     const validated = requireAuthoritativeWeeklyPlanRow(row, userId);
+    const previouslyAuthoritative = authoritativePlanRef.current;
     authoritativePlanRef.current = validated;
     setAuthoritativePlan(validated);
     weeklyPlanCache.set(userId, validated);
     setMealPlan(validated.document);
     setPlanAuthorityStatus('synchronized');
+    setPendingNextGenerationId((pendingCommandId) => {
+      if (!pendingCommandId) {
+        return null;
+      }
+      if (validated.generationId === pendingCommandId) {
+        reconcilingNextGenerationIdRef.current = null;
+        setNextWeekRetry(null);
+        return null;
+      }
+      if (
+        validated.nextGenerationId === pendingCommandId
+        || (
+          reconcilingNextGenerationIdRef.current !== pendingCommandId
+          || previouslyAuthoritative?.nextGenerationId !== pendingCommandId
+        )
+      ) {
+        return pendingCommandId;
+      }
+
+      reconcilingNextGenerationIdRef.current = null;
+      setNextWeekRetry((retry) =>
+        retry ? { ...retry, commandId: null } : retry
+      );
+      return null;
+    });
     return validated;
   };
 
@@ -116,19 +145,6 @@ const App: React.FC = () => {
     setAuthoritativePlan(null);
     weeklyPlanCache.clear(userId);
     setMealPlan(null);
-  };
-
-  const saveCurrentWeeklyPlan = async (userId: string, document: MealPlan) => {
-    const outcome = await weeklyPlanGateway.saveCurrent({
-      commandId: crypto.randomUUID(),
-      userId,
-      document,
-    });
-
-    if (outcome.status !== 'succeeded') {
-      throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
-    }
-    setPlanAuthorityStatus('stale');
   };
 
   // Keep auth callbacks synchronous. Calling another Supabase API from an async
@@ -149,10 +165,12 @@ const App: React.FC = () => {
         setMealPlan(null);
         setMilestones([]);
         setNextWeekRetry(null);
+        setPendingNextGenerationId(null);
         setRerollRetry(null);
         setPendingMealRerolls([]);
         setPendingIngredientIds([]);
         initialGenerationCommandRef.current = null;
+        reconcilingNextGenerationIdRef.current = null;
         setPlanAuthorityStatus('checking');
       }
     };
@@ -352,10 +370,12 @@ const App: React.FC = () => {
       setMealPlan(null);
       setMilestones([]);
       setNextWeekRetry(null);
+      setPendingNextGenerationId(null);
       setRerollRetry(null);
       setPendingMealRerolls([]);
       setPendingIngredientIds([]);
       initialGenerationCommandRef.current = null;
+      reconcilingNextGenerationIdRef.current = null;
       setPlanAuthorityStatus('checking');
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
@@ -621,36 +641,56 @@ const App: React.FC = () => {
   };
 
   // Triggered by the "Next Week" button in Layout
-  const runNextWeekGeneration = async (request: {
-    feedback: MealFeedback[];
-    currentPlan: MealPlan;
-    reviewType: 'empty' | 'partial';
+  const runNextWeekGeneration = async (
+    request: Omit<NextWeeklyPlanCommand, 'commandId'> & {
+    commandId: string | null;
   }) => {
     if (!user || !profile) return;
 
     setIsReviewModalOpen(false);
-    setIsLoading(true);
     setError(null);
+    const commandId = request.commandId ?? crypto.randomUUID();
+    let commandOutcomeReceived = false;
+    setPendingNextGenerationId(commandId);
 
     try {
-      const generatedPlan = await generateMealPlan(
-        profile,
-        request.feedback,
-        request.currentPlan,
-        request.reviewType,
-      );
-      await saveCurrentWeeklyPlan(user.id, generatedPlan);
-      setMealPlan(generatedPlan);
+      const outcome = await generateNextWeeklyPlan(profile, {
+        ...request,
+        commandId,
+      });
+      commandOutcomeReceived = true;
+      if (outcome.status === 'in_progress') {
+        reconcilingNextGenerationIdRef.current = commandId;
+        setNextWeekRetry({ ...request, commandId });
+        requestPlanRefetchRef.current?.();
+        return;
+      }
+      if (outcome.status !== 'succeeded' || !outcome.result) {
+        setPendingNextGenerationId(null);
+        setNextWeekRetry({ ...request, commandId: null });
+        throw new Error(
+          outcome.error?.message ||
+          'A valid Next Weekly Plan was not created. Your current plan is unchanged.',
+        );
+      }
+      applyAuthoritativePlan(outcome.result, user.id);
+      reconcilingNextGenerationIdRef.current = null;
+      setPendingNextGenerationId(null);
       setNextWeekRetry(null);
     } catch (err) {
       console.error('Failed to generate optimized plan:', err);
-      setNextWeekRetry(request);
+      reconcilingNextGenerationIdRef.current =
+        commandOutcomeReceived ? null : commandId;
+      setNextWeekRetry((current) =>
+        current?.commandId === null
+          ? current
+          : { ...request, commandId }
+      );
+      requestPlanRefetchRef.current?.();
       setError(errorMessage(
         err,
         'A valid Next Weekly Plan was not created. Your current plan is unchanged.',
       ));
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -669,11 +709,14 @@ const App: React.FC = () => {
 
   // Called when the Review Modal is submitted
   const handleReviewSubmit = (feedback: MealFeedback[]) => {
-    if (!mealPlan) return;
+    if (!mealPlan || !authoritativePlan) return;
     void runNextWeekGeneration({
       feedback,
       currentPlan: mealPlan,
       reviewType: feedback.length === 0 ? 'empty' : 'partial',
+      displayedPlanId: authoritativePlan.planId,
+      displayedRevision: authoritativePlan.revision,
+      commandId: null,
     });
   };
 
@@ -693,7 +736,10 @@ const App: React.FC = () => {
     );
   }
 
-  const planIsReadOnly = planAuthorityStatus !== 'synchronized';
+  const nextGenerationLocked =
+    !!pendingNextGenerationId || !!authoritativePlan?.nextGenerationId;
+  const planIsReadOnly =
+    planAuthorityStatus !== 'synchronized' || nextGenerationLocked;
   const planLifecycleBlocked =
     planIsReadOnly || !!rerollingState || pendingMealRerolls.length > 0;
 
@@ -706,7 +752,7 @@ const App: React.FC = () => {
       onLogout={handleLogout}
       hasProfile={!!mealPlan}
       canRetryNextWeek={!!nextWeekRetry}
-      planMutationsDisabled={planLifecycleBlocked}
+      planMutationsDisabled={planLifecycleBlocked && !nextWeekRetry}
       currentView={currentView}
       onViewChange={setCurrentView}
     >
@@ -717,6 +763,15 @@ const App: React.FC = () => {
 
         {planAuthorityStatus === 'synchronized' && (
           <span className="sr-only">Current Weekly Plan synchronized</span>
+        )}
+
+        {nextGenerationLocked && mealPlan && (
+          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+            <p className="font-bold">Your Next Weekly Plan is being generated.</p>
+            <p className="text-sm">
+              Your Current Weekly Plan remains available but read-only until generation finishes.
+            </p>
+          </div>
         )}
 
         {planAuthorityStatus === 'checking' && mealPlan && (

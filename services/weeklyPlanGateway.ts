@@ -66,6 +66,8 @@ interface WeeklyPlanDatabaseRow {
   deactivated_at: string | null;
   predecessor_plan_id: string | null;
   generation_id: string | null;
+  next_generation_id: string | null;
+  next_generation_locked_at: string | null;
 }
 
 const authoritativeRow = (row: WeeklyPlanDatabaseRow): AuthoritativeWeeklyPlanRow => ({
@@ -80,6 +82,8 @@ const authoritativeRow = (row: WeeklyPlanDatabaseRow): AuthoritativeWeeklyPlanRo
   deactivatedAt: row.deactivated_at,
   predecessorPlanId: row.predecessor_plan_id,
   generationId: row.generation_id,
+  nextGenerationId: row.next_generation_id,
+  nextGenerationLockedAt: row.next_generation_locked_at,
 });
 
 export const createAuthoritativeWeeklyPlanReader = (
@@ -90,7 +94,8 @@ export const createAuthoritativeWeeklyPlanReader = (
       .from("weekly_plans")
       .select(`
         plan_id, user_id, document, schema_version, revision, is_active,
-        created_at, updated_at, deactivated_at, predecessor_plan_id, generation_id
+        created_at, updated_at, deactivated_at, predecessor_plan_id, generation_id,
+        next_generation_id, next_generation_locked_at
       `)
       .eq("user_id", userId)
       .eq("is_active", true)
@@ -212,6 +217,18 @@ const legacyRow = (
   generationId: null,
 });
 
+export const createStartOverGateway = (
+  client: Pick<SupabaseClient, "rpc">,
+) => ({
+  async startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome> {
+    const { data, error } = await client.rpc("start_over_weekly_plan", {
+      p_command_id: command.commandId,
+    });
+    if (error) throw error;
+    return data as unknown as WeeklyPlanCommandOutcome;
+  },
+});
+
 const failedOutcome = (
   commandId: string,
   error: unknown,
@@ -296,10 +313,12 @@ const legacyWeeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage)
 const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
 const ingredientProgressGateway = createIngredientProgressGateway(supabase);
 const mealRerollReservationReader = createMealRerollReservationReader(supabase);
+const startOverGateway = createStartOverGateway(supabase);
 
 export const weeklyPlanGateway: WeeklyPlanGateway = {
   ...legacyWeeklyPlanGateway,
   getCurrent: authoritativeWeeklyPlanReader.getCurrent,
   setIngredientChecked: ingredientProgressGateway.setIngredientChecked,
+  startOver: startOverGateway.startOver,
   getPendingMealRerolls: mealRerollReservationReader.getPendingMealRerolls,
 };
