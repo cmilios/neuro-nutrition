@@ -40,7 +40,7 @@ describe("immutable release candidate manifest", () => {
       commit: "0123456789abcdef0123456789abcdef01234567",
       targetProjectRef: "isolated-project",
       targetRegion: "eu-west-1",
-      functionVersions: { "generate-meal-plan": "candidate-7" },
+      functionVersions: { "generate-meal-plan": "7" },
       createdAt: "2026-07-27T12:00:00.000Z",
     });
 
@@ -55,7 +55,7 @@ describe("immutable release candidate manifest", () => {
       edgeFunctions: [
         {
           name: "generate-meal-plan",
-          version: "candidate-7",
+          version: "7",
         },
       ],
     });
@@ -82,6 +82,15 @@ describe("immutable release candidate manifest", () => {
         functionVersions: {},
       }),
     ).rejects.toThrow("generate-meal-plan");
+    await expect(
+      createReleaseManifest({
+        root,
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        targetProjectRef: "isolated-project",
+        targetRegion: "eu-west-1",
+        functionVersions: { "generate-meal-plan": "latest" },
+      }),
+    ).rejects.toThrow("positive deployment version");
 
     await writeFile(
       path.join(root, "supabase", "migrations", "001.sql"),
@@ -114,7 +123,20 @@ describe("release rehearsal decision", () => {
     for (const { check } of passingResults) {
       await writeFile(
         path.join(evidenceDirectory, `${check}.json`),
-        `${JSON.stringify({ check, passed: true })}\n`,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          candidateId,
+          check,
+          targetProjectRef: "isolated-project",
+          startedAt: "2026-07-27T12:00:00.000Z",
+          completedAt: "2026-07-27T12:01:00.000Z",
+          command: `rehearse ${check}`,
+          exitCode: 0,
+          assertions: [{ name: `${check} contract`, status: "passed" }],
+          ...(check === "signed-in-two-session-suite"
+            ? { sessions: ["session-a", "session-b"] }
+            : {}),
+        })}\n`,
       );
     }
 
@@ -142,6 +164,23 @@ describe("release rehearsal decision", () => {
           ],
         }),
       ]),
+    });
+
+    await writeFile(
+      path.join(evidenceDirectory, "recovery-point-restored.json"),
+      '{"passed":true}\n',
+    );
+    await expect(
+      createRehearsalReport({
+        root,
+        candidateId,
+        targetProjectRef: "isolated-project",
+        manifestValid: true,
+        results: passingResults,
+      }),
+    ).resolves.toMatchObject({
+      decision: "no-go",
+      missingOrFailedChecks: ["recovery-point-restored"],
     });
 
     await expect(

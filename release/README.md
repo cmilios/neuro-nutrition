@@ -76,8 +76,16 @@ Exercise every generated check:
   ingredient progress, concurrent generation, Meal Reroll, disconnect/refetch,
   stale request, response loss/retry, recovery, reload, and Start Over.
 
-Mark a check `passed` only when its `evidence` array names at least one captured
-artifact. Any missing, failed, or evidence-free check is a `no-go`.
+Mark a check `passed` only when its `evidence` array names at least one JSON
+execution envelope. Each envelope must contain `schemaVersion: 1`, the manifest
+`candidateId`, the check name, isolated `targetProjectRef`, ISO `startedAt` and
+`completedAt`, the executed `command`, `exitCode: 0`, and one or more named
+`assertions` with `status: "passed"`. The two-session check must additionally
+name at least two distinct opaque session IDs in `sessions`. Screenshots, query
+results, and request envelopes can be listed from the execution envelope.
+Candidate association, structure, file readability, and checksums are verified
+when the report is created. Any missing, malformed, failed, or evidence-free
+check is a `no-go`.
 
 ## 3. Create and restore the recovery point
 

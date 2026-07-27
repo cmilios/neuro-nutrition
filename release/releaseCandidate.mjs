@@ -114,8 +114,10 @@ export async function createReleaseManifest({
   }
 
   for (const [name, version] of Object.entries(functionVersions).sort()) {
-    if (!version) {
-      throw new Error(`Edge Function ${name} is missing an immutable version.`);
+    if (!/^[1-9]\d*$/.test(version)) {
+      throw new Error(
+        `Edge Function ${name} requires a positive deployment version.`,
+      );
     }
     const files = await pinFiles(root, `supabase/functions/${name}`);
     edgeFunctions.push({
@@ -269,9 +271,46 @@ export async function createRehearsalReport({
           continue;
         }
         try {
+          const evidenceContents = await readFile(absoluteEvidencePath);
+          const evidenceDocument = JSON.parse(evidenceContents.toString("utf8"));
+          const startedAt = Date.parse(evidenceDocument.startedAt);
+          const completedAt = Date.parse(evidenceDocument.completedAt);
+          const assertionsAreReviewable =
+            Array.isArray(evidenceDocument.assertions) &&
+            evidenceDocument.assertions.length > 0 &&
+            evidenceDocument.assertions.every(
+              (assertion) =>
+                typeof assertion.name === "string" &&
+                assertion.name.trim() &&
+                assertion.status === "passed",
+            );
+          const sessionsAreIndependent =
+            result.check !== "signed-in-two-session-suite" ||
+            (Array.isArray(evidenceDocument.sessions) &&
+              evidenceDocument.sessions.length >= 2 &&
+              new Set(evidenceDocument.sessions).size >= 2);
+          if (
+            evidenceDocument.schemaVersion !== 1 ||
+            evidenceDocument.candidateId !== candidateId ||
+            evidenceDocument.check !== result.check ||
+            evidenceDocument.targetProjectRef !== targetProjectRef ||
+            typeof evidenceDocument.command !== "string" ||
+            !evidenceDocument.command.trim() ||
+            evidenceDocument.exitCode !== 0 ||
+            !Number.isFinite(startedAt) ||
+            !Number.isFinite(completedAt) ||
+            completedAt < startedAt ||
+            !assertionsAreReviewable ||
+            !sessionsAreIndependent
+          ) {
+            evidenceErrors.push(
+              `${relativeEvidencePath}: invalid execution evidence`,
+            );
+            continue;
+          }
           evidence.push({
             path: portable(path.relative(root, absoluteEvidencePath)),
-            sha256: sha256(await readFile(absoluteEvidencePath)),
+            sha256: sha256(evidenceContents),
           });
         } catch {
           evidenceErrors.push(`${relativeEvidencePath}: unreadable`);
