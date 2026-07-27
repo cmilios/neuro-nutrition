@@ -1,11 +1,12 @@
 import React, { ReactNode } from 'react';
-import { Leaf, LogOut, User as UserIcon, CalendarPlus, Settings, PieChart, Utensils } from 'lucide-react';
+import { Leaf, LogOut, User as UserIcon, CalendarPlus, Settings, PieChart, RotateCcw, Utensils } from 'lucide-react';
 import { User, UserProfile } from '../types';
 
 interface LayoutProps {
   children: ReactNode;
   onOpenProfile: () => void;
   onNextWeek: () => void;
+  onStartOver: () => void;
   onLogout: () => void;
   user: User | null;
   userProfile: UserProfile | null;
@@ -20,6 +21,7 @@ const Layout: React.FC<LayoutProps> = ({
   children, 
   onOpenProfile, 
   onNextWeek, 
+  onStartOver,
   onLogout, 
   user, 
   userProfile,
@@ -103,6 +105,16 @@ const Layout: React.FC<LayoutProps> = ({
                  >
                    <Settings size={16} />
                    <span className="hidden sm:inline">Settings</span>
+                 </button>
+
+                 <button
+                  onClick={onStartOver}
+                  disabled={planMutationsDisabled}
+                  className="text-sm font-medium text-slate-500 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2 transition-colors"
+                  title="Deactivate this Current Weekly Plan"
+                 >
+                   <RotateCcw size={16} />
+                   <span className="hidden sm:inline">Start Over</span>
                  </button>
                </>
              )}

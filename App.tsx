@@ -620,12 +620,16 @@ const App: React.FC = () => {
     }
   };
 
-  const handleReset = async () => {
-    if (!user) return;
+  const handleStartOver = async () => {
+    if (!user || !authoritativePlan || planAuthorityStatus !== 'synchronized') return;
+    const displayedPlan = authoritativePlan;
+    setPlanAuthorityStatus('stale');
     try {
       const outcome = await weeklyPlanGateway.startOver({
         commandId: crypto.randomUUID(),
         userId: user.id,
+        displayedPlanId: displayedPlan.planId,
+        displayedRevision: displayedPlan.revision,
       });
       if (outcome.status !== 'succeeded') {
         throw new Error(outcome.error?.message || 'Start Over did not succeed.');
@@ -633,10 +637,13 @@ const App: React.FC = () => {
       setError(null);
       setNextWeekRetry(null);
       setRerollRetry(null);
-      setPlanAuthorityStatus('stale');
+      setPendingMealRerolls([]);
+      clearAuthoritativePlan(user.id);
+      setPlanAuthorityStatus('confirmed-empty');
+      setIsProfileModalOpen(false);
     } catch (clearError) {
-      console.error('Failed to reset user data:', clearError);
-      setError('Could not reset your data. Please try again.');
+      console.error('Failed to Start Over:', clearError);
+      setError('Could not start over. Please try again.');
     }
   };
 
@@ -702,8 +709,6 @@ const App: React.FC = () => {
     if (mealPlan) {
       if (planAuthorityStatus !== 'synchronized') return;
       setIsReviewModalOpen(true);
-    } else {
-      handleReset();
     }
   };
 
@@ -749,6 +754,7 @@ const App: React.FC = () => {
       userProfile={profile}
       onOpenProfile={() => setIsProfileModalOpen(true)}
       onNextWeek={handleNextWeekRequest}
+      onStartOver={() => void handleStartOver()}
       onLogout={handleLogout}
       hasProfile={!!mealPlan}
       canRetryNextWeek={!!nextWeekRetry}

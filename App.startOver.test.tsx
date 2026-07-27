@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { weeklyPlanFixture } from "./test/weeklyPlanFixture";
+import type { AuthoritativeWeeklyPlanRow } from "./types";
 
 const {
   getProfileData,
@@ -56,11 +58,20 @@ vi.mock("./services/authService", () => ({
 }));
 
 vi.mock("./components/Layout", () => ({
-  default: ({ children, onNextWeek, userProfile }) => (
+  default: ({ children, onStartOver, userProfile }) => (
     <div>
       <div>{userProfile ? `profile-${userProfile.age}` : "profile-empty"}</div>
-      <button onClick={onNextWeek}>Exercise Start Over</button>
+      <button onClick={onStartOver}>Exercise Start Over</button>
       {children}
+    </div>
+  ),
+}));
+
+vi.mock("./components/PlanDashboard", () => ({
+  default: ({ plan, isReadOnly }) => (
+    <div>
+      <span>{plan.weeklySummary}</span>
+      <span>{isReadOnly ? "plan-read-only" : "plan-editable"}</span>
     </div>
   ),
 }));
@@ -70,6 +81,20 @@ vi.mock("./components/ProfileForm", () => ({
 }));
 
 import App from "./App";
+
+const authoritativeRow: AuthoritativeWeeklyPlanRow = {
+  planId: "20000000-0000-4000-8000-000000000001",
+  userId: "user-1",
+  document: weeklyPlanFixture,
+  schemaVersion: 1,
+  revision: 3,
+  isActive: true,
+  createdAt: "2026-07-27T10:00:00.000Z",
+  updatedAt: "2026-07-27T11:00:00.000Z",
+  deactivatedAt: null,
+  predecessorPlanId: null,
+  generationId: null,
+};
 
 describe("application Start Over flow", () => {
   beforeEach(() => {
@@ -86,32 +111,41 @@ describe("application Start Over flow", () => {
       },
       milestones: [{ id: "milestone-1", date: "2026-07-27", weight: 75 }],
     });
-    getCurrent.mockReset().mockResolvedValue(null);
+    getCurrent.mockReset().mockResolvedValue(authoritativeRow);
     startOver.mockReset();
   });
 
-  it("keeps the loaded plan stale until Start Over is authoritatively confirmed", async () => {
-    startOver.mockImplementation(async ({ commandId }) => ({
-      commandId,
-      status: "succeeded",
-      result: null,
-      error: null,
+  it("keeps the displayed plan read-only until Start Over confirms empty", async () => {
+    let confirmStartOver:
+      ((outcome: Record<string, unknown>) => void) | undefined;
+    startOver.mockImplementation(({ commandId }) => new Promise((resolve) => {
+      confirmStartOver = (outcome) => resolve({ commandId, ...outcome });
     }));
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByText("profile-30")).toBeInTheDocument();
+    expect(await screen.findByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
+    expect(screen.getByText("plan-editable")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Exercise Start Over" }));
 
-    await waitFor(() => {
-      expect(screen.getByText("profile-30")).toBeInTheDocument();
-      expect(screen.getByText("This plan may be out of date.")).toBeInTheDocument();
-      expect(screen.queryByText("Profile form")).not.toBeInTheDocument();
-    });
+    expect(await screen.findByText("plan-read-only")).toBeInTheDocument();
+    expect(screen.getByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
+    expect(screen.queryByText("Profile form")).not.toBeInTheDocument();
     expect(startOver).toHaveBeenCalledWith({
       commandId: expect.any(String),
       userId: "user-1",
+      displayedPlanId: authoritativeRow.planId,
+      displayedRevision: authoritativeRow.revision,
     });
+
+    confirmStartOver?.({
+      status: "succeeded",
+      result: null,
+      error: null,
+    });
+
+    expect(await screen.findByText("Profile form")).toBeInTheDocument();
+    expect(screen.queryByText(weeklyPlanFixture.weeklySummary)).not.toBeInTheDocument();
   });
 
   it("retains loaded client state after a failed Start Over command", async () => {
@@ -128,11 +162,12 @@ describe("application Start Over flow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByText("profile-30")).toBeInTheDocument();
+    expect(await screen.findByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Exercise Start Over" }));
 
-    expect(await screen.findByText("Could not reset your data. Please try again."))
+    expect(await screen.findByText("Could not start over. Please try again."))
       .toBeInTheDocument();
-    expect(screen.getByText("profile-30")).toBeInTheDocument();
+    expect(screen.getByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
+    expect(screen.getByText("plan-read-only")).toBeInTheDocument();
   });
 });

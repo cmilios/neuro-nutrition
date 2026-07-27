@@ -5,6 +5,7 @@ import {
   createAuthoritativeWeeklyPlanReader,
   createIngredientProgressGateway,
   createMealRerollReservationReader,
+  createStartOverGateway,
   createWeeklyPlanInvalidationSubscription,
   createWeeklyPlanGateway,
 } from "./weeklyPlanGateway";
@@ -269,7 +270,7 @@ describe("Weekly Plan gateway", () => {
     });
   });
 
-  it("routes Start Over through the gateway and preserves its command envelope", async () => {
+  it("never implements Start Over by clearing legacy user data", async () => {
     const storage = {
       getWeeklyPlan: vi.fn(),
       createWeeklyPlan: vi.fn(),
@@ -281,13 +282,42 @@ describe("Weekly Plan gateway", () => {
     await expect(gateway.startOver({
       commandId: "command-3",
       userId: "user-1",
+      displayedPlanId: "legacy:user-1",
+      displayedRevision: 0,
     })).resolves.toEqual({
       commandId: "command-3",
+      status: "failed",
+      result: null,
+      error: {
+        code: "weekly_plan_persistence_failed",
+        message: "Start Over requires the authoritative store.",
+        retryable: true,
+      },
+    });
+    expect(storage.clearUserData).not.toHaveBeenCalled();
+  });
+
+  it("identifies the displayed Weekly Plan when issuing Start Over", async () => {
+    const result = {
+      commandId: "10000000-0000-4000-8000-000000000001",
       status: "succeeded",
       result: null,
       error: null,
+    };
+    const rpc = vi.fn().mockResolvedValue({ data: result, error: null });
+    const gateway = createStartOverGateway({ rpc } as never);
+
+    await expect(gateway.startOver({
+      commandId: "10000000-0000-4000-8000-000000000001",
+      userId: "user-1",
+      displayedPlanId: "20000000-0000-4000-8000-000000000001",
+      displayedRevision: 3,
+    })).resolves.toEqual(result);
+    expect(rpc).toHaveBeenCalledWith("start_over_weekly_plan", {
+      p_displayed_plan_id: "20000000-0000-4000-8000-000000000001",
+      p_displayed_revision: 3,
+      p_command_id: "10000000-0000-4000-8000-000000000001",
     });
-    expect(storage.clearUserData).toHaveBeenCalledWith("user-1");
   });
 
   it("sets ingredient progress through the narrow authenticated command", async () => {

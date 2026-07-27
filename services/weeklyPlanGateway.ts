@@ -43,6 +43,8 @@ interface SaveCurrentWeeklyPlanCommand {
 interface StartOverCommand {
   commandId: string;
   userId: string;
+  displayedPlanId: string;
+  displayedRevision: number;
 }
 
 export interface WeeklyPlanGateway {
@@ -222,6 +224,8 @@ export const createStartOverGateway = (
 ) => ({
   async startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome> {
     const { data, error } = await client.rpc("start_over_weekly_plan", {
+      p_displayed_plan_id: command.displayedPlanId,
+      p_displayed_revision: command.displayedRevision,
       p_command_id: command.commandId,
     });
     if (error) throw error;
@@ -292,17 +296,10 @@ export const createWeeklyPlanGateway = (
   },
 
   async startOver(command) {
-    try {
-      await storage.clearUserData(command.userId);
-      return {
-        commandId: command.commandId,
-        status: "succeeded",
-        result: null,
-        error: null,
-      };
-    } catch (error) {
-      return failedOutcome(command.commandId, error);
-    }
+    return failedOutcome(
+      command.commandId,
+      new Error("Start Over requires the authoritative store."),
+    );
   },
   async getPendingMealRerolls() {
     return [];

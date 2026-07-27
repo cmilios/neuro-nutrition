@@ -280,6 +280,22 @@ describe("authority-first Current Weekly Plan loading", () => {
     expect(getCurrent).toHaveBeenCalledTimes(2);
   });
 
+  it("converges a connected session on confirmed-empty after remote Start Over", async () => {
+    getCurrent
+      .mockResolvedValueOnce(authoritativeRow())
+      .mockResolvedValueOnce(null);
+
+    render(<App />);
+    expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
+
+    act(() => realtimeCallbacks[0].invalidate());
+
+    expect(await screen.findByRole("heading", { name: "Let's build your plan." }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Test Berry Breakfast")).not.toBeInTheDocument();
+    expect(getCurrent).toHaveBeenCalledTimes(2);
+  });
+
   it("makes a disconnected snapshot stale and read-only until reconnect refetch succeeds", async () => {
     getCurrent.mockResolvedValue(authoritativeRow());
 
