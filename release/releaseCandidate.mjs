@@ -72,6 +72,14 @@ function candidateIdentity(manifestWithoutIdentity) {
   return sha256(`${JSON.stringify(manifestWithoutIdentity)}\n`);
 }
 
+function isCanonicalIsoTimestamp(value) {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
+    new Date(value).toISOString() === value
+  );
+}
+
 export async function createReleaseManifest({
   root,
   commit,
@@ -288,7 +296,12 @@ export async function createRehearsalReport({
             result.check !== "signed-in-two-session-suite" ||
             (Array.isArray(evidenceDocument.sessions) &&
               evidenceDocument.sessions.length >= 2 &&
-              new Set(evidenceDocument.sessions).size >= 2);
+              evidenceDocument.sessions.every(
+                (sessionId) =>
+                  typeof sessionId === "string" && sessionId.trim(),
+              ) &&
+              new Set(evidenceDocument.sessions).size ===
+                evidenceDocument.sessions.length);
           if (
             evidenceDocument.schemaVersion !== 1 ||
             evidenceDocument.candidateId !== candidateId ||
@@ -297,6 +310,8 @@ export async function createRehearsalReport({
             typeof evidenceDocument.command !== "string" ||
             !evidenceDocument.command.trim() ||
             evidenceDocument.exitCode !== 0 ||
+            !isCanonicalIsoTimestamp(evidenceDocument.startedAt) ||
+            !isCanonicalIsoTimestamp(evidenceDocument.completedAt) ||
             !Number.isFinite(startedAt) ||
             !Number.isFinite(completedAt) ||
             completedAt < startedAt ||

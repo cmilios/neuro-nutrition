@@ -120,23 +120,24 @@ describe("release rehearsal decision", () => {
       status: "passed",
       evidence: [`${check}.json`],
     }));
+    const executionEvidence = (check) => ({
+      schemaVersion: 1,
+      candidateId,
+      check,
+      targetProjectRef: "isolated-project",
+      startedAt: "2026-07-27T12:00:00.000Z",
+      completedAt: "2026-07-27T12:01:00.000Z",
+      command: `rehearse ${check}`,
+      exitCode: 0,
+      assertions: [{ name: `${check} contract`, status: "passed" }],
+      ...(check === "signed-in-two-session-suite"
+        ? { sessions: ["session-a", "session-b"] }
+        : {}),
+    });
     for (const { check } of passingResults) {
       await writeFile(
         path.join(evidenceDirectory, `${check}.json`),
-        `${JSON.stringify({
-          schemaVersion: 1,
-          candidateId,
-          check,
-          targetProjectRef: "isolated-project",
-          startedAt: "2026-07-27T12:00:00.000Z",
-          completedAt: "2026-07-27T12:01:00.000Z",
-          command: `rehearse ${check}`,
-          exitCode: 0,
-          assertions: [{ name: `${check} contract`, status: "passed" }],
-          ...(check === "signed-in-two-session-suite"
-            ? { sessions: ["session-a", "session-b"] }
-            : {}),
-        })}\n`,
+        `${JSON.stringify(executionEvidence(check))}\n`,
       );
     }
 
@@ -165,6 +166,38 @@ describe("release rehearsal decision", () => {
         }),
       ]),
     });
+
+    await writeFile(
+      path.join(evidenceDirectory, "signed-in-two-session-suite.json"),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        candidateId,
+        check: "signed-in-two-session-suite",
+        targetProjectRef: "isolated-project",
+        startedAt: "July 27, 2026",
+        completedAt: "2026-07-27T12:01:00.000Z",
+        command: "rehearse signed-in-two-session-suite",
+        exitCode: 0,
+        assertions: [{ name: "two sessions", status: "passed" }],
+        sessions: [null, { id: "not-opaque" }],
+      })}\n`,
+    );
+    await expect(
+      createRehearsalReport({
+        root,
+        candidateId,
+        targetProjectRef: "isolated-project",
+        manifestValid: true,
+        results: passingResults,
+      }),
+    ).resolves.toMatchObject({
+      decision: "no-go",
+      missingOrFailedChecks: ["signed-in-two-session-suite"],
+    });
+    await writeFile(
+      path.join(evidenceDirectory, "signed-in-two-session-suite.json"),
+      `${JSON.stringify(executionEvidence("signed-in-two-session-suite"))}\n`,
+    );
 
     await writeFile(
       path.join(evidenceDirectory, "recovery-point-restored.json"),
