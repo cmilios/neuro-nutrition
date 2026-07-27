@@ -14,6 +14,7 @@ export interface GenerationUser {
 
 export interface GenerationRequest {
   action: "plan" | "meal";
+  commandId?: string;
   profile: Record<string, unknown>;
   feedback?: MealReviewFeedback[];
   mealType?: string;
@@ -60,6 +61,61 @@ export interface GenerateMealPlanDependencies {
   authenticate(request: Request): Promise<GenerationUser>;
   generate(request: GenerationRequest): Promise<GenerationResult>;
   persist(record: GenerationRecord): Promise<void>;
+  initialGeneration?: InitialGenerationCommandStore;
+}
+
+export interface WeeklyPlanCommandError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface InitialGenerationCommandOutcome {
+  commandId: string;
+  status: "succeeded" | "in_progress" | "failed";
+  result: unknown | null;
+  error: WeeklyPlanCommandError | null;
+  shouldGenerate: boolean;
+  checkpoint?: InitialGenerationCheckpoint | null;
+}
+
+export type InitialGenerationCheckpoint =
+  | {
+    kind: "success";
+    document: unknown;
+    usageRecord: ProviderUsageRecord;
+  }
+  | {
+    kind: "failure" | "unknown";
+    usageRecord: ProviderUsageRecord;
+    error: WeeklyPlanCommandError;
+    evidence: Record<string, unknown>;
+  };
+
+interface InitialGenerationCommandIdentity {
+  commandId: string;
+  userId: string;
+  inputFingerprint: string;
+}
+
+export interface InitialGenerationCommandStore {
+  begin(identity: InitialGenerationCommandIdentity): Promise<InitialGenerationCommandOutcome>;
+  checkpoint(
+    command: InitialGenerationCommandIdentity & {
+      checkpoint: InitialGenerationCheckpoint;
+    },
+  ): Promise<InitialGenerationCommandOutcome>;
+  complete(
+    identity: InitialGenerationCommandIdentity & { document: unknown },
+  ): Promise<InitialGenerationCommandOutcome>;
+  fail(
+    identity: InitialGenerationCommandIdentity & {
+      errorCode: string;
+      errorMessage: string;
+      retryable: boolean;
+      evidence: Record<string, unknown>;
+    },
+  ): Promise<InitialGenerationCommandOutcome>;
 }
 
 export class HttpError extends Error {
@@ -78,6 +134,7 @@ export class ProviderGenerationError extends HttpError {
     status: number,
     code: string,
     readonly usageRecord: ProviderUsageRecord,
+    readonly outcomeUnknown = false,
   ) {
     super(message, status, code);
   }
@@ -95,6 +152,44 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 });
 
 const allowedMealTypes = new Set(["breakfast", "lunch", "dinner", "snack"]);
+const commandIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const normalizeForFingerprint = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeForFingerprint);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, normalizeForFingerprint(item)]),
+    );
+  }
+  return value;
+};
+
+async function fingerprintInitialGeneration(request: GenerationRequest): Promise<string> {
+  const normalized = JSON.stringify(normalizeForFingerprint({
+    operation: "generate_initial",
+    profile: request.profile,
+  }));
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(normalized),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+const commandResponse = (outcome: InitialGenerationCommandOutcome) => {
+  const {
+    shouldGenerate: _shouldGenerate,
+    checkpoint: _checkpoint,
+    ...response
+  } = outcome;
+  return response;
+};
 
 function parseGenerationRequest(value: unknown): GenerationRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -241,6 +336,135 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         throw new HttpError("Request body must be valid JSON.", 400, "invalid_json");
       }
 
+      const isInitialGeneration =
+        generationRequest.action === "plan" &&
+        generationRequest.reviewType === undefined &&
+        generationRequest.currentPlan === undefined;
+      if (isInitialGeneration && dependencies.initialGeneration) {
+        if (
+          typeof generationRequest.commandId !== "string" ||
+          !commandIdPattern.test(generationRequest.commandId)
+        ) {
+          throw new HttpError(
+            "A valid command ID is required.",
+            400,
+            "invalid_command_id",
+          );
+        }
+
+        const identity = {
+          commandId: generationRequest.commandId,
+          userId: user.id,
+          inputFingerprint: await fingerprintInitialGeneration(generationRequest),
+        };
+        const finalizeCheckpoint = async (
+          outcome: InitialGenerationCommandOutcome,
+        ): Promise<Response> => {
+          const checkpoint = outcome.checkpoint;
+          if (!checkpoint) return json(commandResponse(outcome));
+
+          const usagePersisted = await persistAndReport(
+            user!,
+            generationRequest!,
+            checkpoint.usageRecord,
+          );
+          if (!usagePersisted) {
+            throw new HttpError(
+              "The provider attempt is awaiting durable reconciliation.",
+              503,
+              "usage_persistence_failed",
+            );
+          }
+          if (checkpoint.kind === "unknown") {
+            throw new HttpError(
+              "The provider outcome is unknown and requires reconciliation.",
+              503,
+              "generation_outcome_unknown",
+            );
+          }
+          if (checkpoint.kind === "failure") {
+            const failed = await dependencies.initialGeneration!.fail({
+              ...identity,
+              errorCode: checkpoint.error.code,
+              errorMessage: checkpoint.error.message,
+              retryable: checkpoint.error.retryable,
+              evidence: checkpoint.evidence,
+            });
+            return json(commandResponse(failed));
+          }
+
+          const completed = await dependencies.initialGeneration!.complete({
+            ...identity,
+            document: checkpoint.document,
+          });
+          return json(commandResponse(completed));
+        };
+
+        const started = await dependencies.initialGeneration.begin(identity);
+        if (!started.shouldGenerate) {
+          return await finalizeCheckpoint(started);
+        }
+
+        let result: GenerationResult;
+        try {
+          result = await dependencies.generate({
+            ...generationRequest,
+            attempt: 1,
+          });
+        } catch (error) {
+          if (error instanceof ProviderGenerationError) {
+            const evidence = {
+              stage: "provider",
+              reason: error.code,
+              callId: error.usageRecord.callId,
+              attempt: error.usageRecord.attempt,
+              providerRequestId: error.usageRecord.providerRequestId,
+              providerResponseId: error.usageRecord.providerResponseId,
+            };
+            const checkpointed = await dependencies.initialGeneration.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: error.outcomeUnknown ? "unknown" : "failure",
+                usageRecord: error.usageRecord,
+                error: {
+                  code: error.outcomeUnknown
+                    ? "generation_outcome_unknown"
+                    : "generation_failed",
+                  message: error.outcomeUnknown
+                    ? "The provider outcome is unknown and requires reconciliation."
+                    : "A valid Current Weekly Plan was not created.",
+                  retryable: false,
+                },
+                evidence,
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          }
+
+          const failed = await dependencies.initialGeneration.fail({
+            ...identity,
+            errorCode: "generation_failed",
+            errorMessage: "A valid Current Weekly Plan was not created.",
+            retryable: false,
+            evidence: {
+              stage: "generation",
+              reason: error instanceof HttpError ? error.code : "unexpected_error",
+            },
+          });
+          return json(commandResponse(failed));
+        }
+
+        const checkpointed = await dependencies.initialGeneration.checkpoint({
+          ...identity,
+          checkpoint: {
+            kind: "success",
+            document: result.data,
+            usageRecord: result.usageRecord,
+          },
+        });
+        return await finalizeCheckpoint(checkpointed);
+      }
+
       const isNextWeeklyPlanReview =
         generationRequest.action === "plan" &&
         (generationRequest.reviewType === "empty" || generationRequest.reviewType === "partial") &&
@@ -317,9 +541,9 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
               throw new HttpError(
                 "Meal generation could not be recorded. Your original meal is unchanged.",
                 503,
-                "usage_persistence_failed",
-              );
-            }
+              "usage_persistence_failed",
+            );
+          }
             const { mealType: _mealType, ...meal } = result.data as Meal & { mealType: string };
             return json({ data: meal });
           }

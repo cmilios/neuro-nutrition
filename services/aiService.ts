@@ -1,4 +1,10 @@
-import { UserProfile, MealPlan, Meal, MealFeedback } from "../types";
+import {
+  UserProfile,
+  MealPlan,
+  Meal,
+  MealFeedback,
+  WeeklyPlanCommandOutcome,
+} from "../types";
 import { supabase } from "./supabaseClient";
 
 // All AI generation goes through the `generate-meal-plan` Supabase Edge Function,
@@ -34,6 +40,46 @@ async function invokeAI<T>(body: Record<string, unknown>): Promise<T> {
 
   return data.data as T;
 }
+
+async function invokeCommand(
+  body: Record<string, unknown>,
+): Promise<WeeklyPlanCommandOutcome> {
+  const { data, error } = await supabase.functions.invoke("generate-meal-plan", {
+    body,
+  });
+
+  if (error) {
+    let message = error.message;
+    try {
+      const context = (error as { context?: Response }).context;
+      const parsed = context && typeof context.json === "function"
+        ? await context.json()
+        : undefined;
+      if (typeof parsed?.error?.message === "string") {
+        message = parsed.error.message;
+      }
+    } catch {
+      // A transport failure has an unknown command outcome. The caller retains
+      // the command ID and retries the same intent.
+    }
+    throw new Error(message || "Weekly Plan generation outcome is unknown.");
+  }
+
+  if (
+    !data ||
+    typeof data.commandId !== "string" ||
+    !["succeeded", "in_progress", "failed"].includes(data.status)
+  ) {
+    throw new Error("The Weekly Plan command returned an invalid response.");
+  }
+  return data as WeeklyPlanCommandOutcome;
+}
+
+export const generateInitialWeeklyPlan = (
+  profile: UserProfile,
+  commandId: string,
+): Promise<WeeklyPlanCommandOutcome> =>
+  invokeCommand({ action: "plan", commandId, profile });
 
 export const generateMealPlan = async (
   profile: UserProfile,

@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 import type { GenerationRecord } from "./handler";
-import { persistUsageRecordToSupabase } from "./persistence";
+import {
+  createInitialGenerationCommandStore,
+  persistUsageRecordToSupabase,
+} from "./persistence";
 
 const record: GenerationRecord = {
   callId: "00000000-0000-4000-8000-000000000201",
@@ -69,5 +72,138 @@ describe("AI Usage Record persistence", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(delay).not.toHaveBeenCalled();
+  });
+});
+
+describe("initial generation command persistence", () => {
+  it("uses separate RPC requests for start and completion transactions", async () => {
+    const pending = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "in_progress",
+      result: null,
+      error: null,
+      shouldGenerate: true,
+    };
+    const completed = {
+      ...pending,
+      status: "succeeded",
+      result: { planId: "20000000-0000-4000-8000-000000000001", revision: 0 },
+      shouldGenerate: false,
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json(pending))
+      .mockResolvedValueOnce(Response.json({
+        ...pending,
+        shouldGenerate: false,
+        checkpoint: {
+          kind: "success",
+          document: { weeklySummary: "complete", days: [] },
+          usageRecord: record,
+        },
+      }))
+      .mockResolvedValueOnce(Response.json(completed));
+    const commandStore = createInitialGenerationCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+    const identity = {
+      commandId: pending.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+      inputFingerprint: "a".repeat(64),
+    };
+
+    await expect(commandStore.begin(identity)).resolves.toEqual(pending);
+    await expect(commandStore.checkpoint({
+      ...identity,
+      checkpoint: {
+        kind: "success",
+        document: { weeklySummary: "complete", days: [] },
+        usageRecord: record,
+      },
+    })).resolves.toEqual(expect.objectContaining({
+      checkpoint: expect.objectContaining({ kind: "success" }),
+    }));
+    await expect(commandStore.complete({
+      ...identity,
+      document: { weeklySummary: "complete", days: [] },
+    })).resolves.toEqual(completed);
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "https://example.supabase.co/rest/v1/rpc/begin_initial_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: identity.userId,
+          p_command_id: identity.commandId,
+          p_input_fingerprint: identity.inputFingerprint,
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "https://example.supabase.co/rest/v1/rpc/checkpoint_initial_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: identity.userId,
+          p_command_id: identity.commandId,
+          p_input_fingerprint: identity.inputFingerprint,
+          p_checkpoint: {
+            kind: "success",
+            document: { weeklySummary: "complete", days: [] },
+            usageRecord: record,
+          },
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "https://example.supabase.co/rest/v1/rpc/complete_initial_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: identity.userId,
+          p_command_id: identity.commandId,
+          p_input_fingerprint: identity.inputFingerprint,
+          p_document: { weeklySummary: "complete", days: [] },
+        }),
+      }),
+    );
+  });
+
+  it("sends only structured privacy-safe evidence when failing a command", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "failed",
+      result: null,
+      error: { code: "generation_failed", message: "Failed.", retryable: false },
+      shouldGenerate: false,
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createInitialGenerationCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.fail({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+      inputFingerprint: "a".repeat(64),
+      errorCode: "generation_failed",
+      errorMessage: "Failed.",
+      retryable: false,
+      evidence: { stage: "provider", providerRequestId: "req_safe" },
+    });
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(body).toEqual(expect.objectContaining({
+      p_error_code: "generation_failed",
+      p_failure_evidence: { stage: "provider", providerRequestId: "req_safe" },
+    }));
+    expect(JSON.stringify(body)).not.toContain("profile");
+    expect(JSON.stringify(body)).not.toContain("ingredient");
   });
 });

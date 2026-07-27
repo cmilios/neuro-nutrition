@@ -9,7 +9,11 @@ import AuthScreen from './components/AuthScreen';
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
 import { UserProfile, MealPlan, User, DayPlan, Meal, MealFeedback, Milestone } from './types';
-import { generateMealPlan, regenerateSingleMeal } from './services/aiService';
+import {
+  generateInitialWeeklyPlan,
+  generateMealPlan,
+  regenerateSingleMeal,
+} from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { weeklyPlanGateway } from './services/weeklyPlanGateway';
@@ -32,6 +36,10 @@ const App: React.FC = () => {
 
   // Track the currently loaded user ID to avoid stale closures in effects
   const loadedUserIdRef = React.useRef<string | null>(null);
+  const initialGenerationCommandRef = React.useRef<{
+    commandId: string;
+    normalizedProfile: string;
+  } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,25 +92,6 @@ const App: React.FC = () => {
     setPlanAuthorityStatus('stale');
   };
 
-  const createCurrentWeeklyPlan = async (
-    userId: string,
-    document: MealPlan,
-    submittedProfile: UserProfile,
-  ) => {
-    const outcome = await weeklyPlanGateway.createCurrent({
-      commandId: crypto.randomUUID(),
-      userId,
-      document,
-      profile: submittedProfile,
-      milestones,
-    });
-
-    if (outcome.status !== 'succeeded') {
-      throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
-    }
-    setPlanAuthorityStatus('stale');
-  };
-
   // Keep auth callbacks synchronous. Calling another Supabase API from an async
   // onAuthStateChange callback can deadlock supabase-js.
   useEffect(() => {
@@ -120,6 +109,7 @@ const App: React.FC = () => {
         setMilestones([]);
         setNextWeekRetry(null);
         setRerollRetry(null);
+        initialGenerationCommandRef.current = null;
         setPlanAuthorityStatus('checking');
       }
     };
@@ -223,6 +213,7 @@ const App: React.FC = () => {
       setMilestones([]);
       setNextWeekRetry(null);
       setRerollRetry(null);
+      initialGenerationCommandRef.current = null;
       setPlanAuthorityStatus('checking');
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
@@ -240,14 +231,35 @@ const App: React.FC = () => {
     setError(null);
 
     try {
-      const generatedPlan = await generateMealPlan(data);
-      setMealPlan(generatedPlan);
+      const normalizedProfile = JSON.stringify(data);
+      const pendingCommand = initialGenerationCommandRef.current;
+      const commandId = pendingCommand?.normalizedProfile === normalizedProfile
+        ? pendingCommand.commandId
+        : crypto.randomUUID();
+      initialGenerationCommandRef.current = { commandId, normalizedProfile };
+
+      const outcome = await generateInitialWeeklyPlan(data, commandId);
+      if (outcome.status === 'in_progress') {
+        throw new Error('Your Current Weekly Plan is still being generated. Please try again shortly.');
+      }
+      if (outcome.status === 'failed') {
+        initialGenerationCommandRef.current = null;
+        throw new Error(outcome.error?.message || 'A valid Current Weekly Plan was not created.');
+      }
+      if (!outcome.result) {
+        throw new Error('The generation command did not return a Current Weekly Plan.');
+      }
+
+      const authoritative = requireAuthoritativeWeeklyPlanRow(outcome.result, user.id);
+      initialGenerationCommandRef.current = null;
+      weeklyPlanCache.set(user.id, authoritative);
+      setMealPlan(authoritative.document);
+      setPlanAuthorityStatus('synchronized');
       try {
-        await createCurrentWeeklyPlan(user.id, generatedPlan, data);
-      } catch (saveError) {
-        console.error('Plan generated but failed to save:', saveError);
-        setPlanAuthorityStatus('stale');
-        setError('Your plan was generated, but it could not be synced. Please try again before leaving this page.');
+        await storageService.saveProfileData(user.id, data, milestones);
+      } catch (profileSaveError) {
+        console.error('Current Weekly Plan generated but profile save failed:', profileSaveError);
+        setError('Your Current Weekly Plan is ready, but your profile changes could not be saved.');
       }
     } catch (err) {
       console.error('Failed to generate meal plan:', err);

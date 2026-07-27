@@ -1,10 +1,20 @@
-import type { GenerationRecord } from "./handler.ts";
+import type {
+  GenerationRecord,
+  InitialGenerationCommandOutcome,
+  InitialGenerationCommandStore,
+} from "./handler.ts";
 
 interface PersistenceOptions {
   supabaseUrl: string;
   serviceRoleKey: string;
   fetchImpl?: typeof fetch;
   delay?: (milliseconds: number) => Promise<void>;
+}
+
+interface CommandPersistenceOptions {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  fetchImpl?: typeof fetch;
 }
 
 const defaultDelay = (milliseconds: number) =>
@@ -72,4 +82,68 @@ export async function persistUsageRecordToSupabase(
   throw new Error("AI Usage Record insert failed", {
     cause: lastError ?? (lastStatus ? new Error(`HTTP ${lastStatus}`) : undefined),
   });
+}
+
+export function createInitialGenerationCommandStore(
+  options: CommandPersistenceOptions,
+): InitialGenerationCommandStore {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const rpc = async (
+    functionName: string,
+    body: Record<string, unknown>,
+  ): Promise<InitialGenerationCommandOutcome> => {
+    const response = await fetchImpl(
+      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: options.serviceRoleKey,
+          Authorization: `Bearer ${options.serviceRoleKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Weekly Plan command ${functionName} failed with HTTP ${response.status}`);
+    }
+    return await response.json() as InitialGenerationCommandOutcome;
+  };
+
+  return {
+    begin(identity) {
+      return rpc("begin_initial_weekly_plan_generation", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+        p_input_fingerprint: identity.inputFingerprint,
+      });
+    },
+    checkpoint(command) {
+      return rpc("checkpoint_initial_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_checkpoint: command.checkpoint,
+      });
+    },
+    complete(command) {
+      return rpc("complete_initial_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_document: command.document,
+      });
+    },
+    fail(command) {
+      return rpc("fail_initial_weekly_plan_generation", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_error_code: command.errorCode,
+        p_error_message: command.errorMessage,
+        p_retryable: command.retryable,
+        p_failure_evidence: command.evidence,
+      });
+    },
+  };
 }

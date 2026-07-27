@@ -20,7 +20,10 @@ import {
   type GenerationResult,
 } from "./handler.ts";
 import { createOpenAIUsageRecord } from "./usage.ts";
-import { persistUsageRecordToSupabase } from "./persistence.ts";
+import {
+  createInitialGenerationCommandStore,
+  persistUsageRecordToSupabase,
+} from "./persistence.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
 // The current recommended GPT-5.6 coding/reasoning model is the default. The
@@ -363,6 +366,7 @@ async function callOpenAI(
         outcome: "failure",
         errorCode: code,
       }),
+      true,
     );
   }
 
@@ -582,10 +586,20 @@ async function persistUsageRecord(record: GenerationRecord): Promise<void> {
   await persistUsageRecordToSupabase(record, { supabaseUrl, serviceRoleKey });
 }
 
+const supabaseUrl = Deno.env.get("SUPABASE_URL");
+const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+if (!supabaseUrl || !serviceRoleKey) {
+  throw new Error("Weekly Plan command persistence is not configured");
+}
+
 const handler = createGenerateMealPlanHandler({
   authenticate: requireAuthenticatedUser,
   generate,
   persist: persistUsageRecord,
+  initialGeneration: createInitialGenerationCommandStore({
+    supabaseUrl,
+    serviceRoleKey,
+  }),
 });
 
 Deno.serve(handler);

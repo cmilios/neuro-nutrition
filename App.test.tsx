@@ -126,7 +126,27 @@ describe("application generation flow", () => {
   });
 
   it("generates and renders the returned Weekly Plan", async () => {
-    edgeFunctionInvoke.mockResolvedValue({ data: { data: weeklyPlanFixture }, error: null });
+    edgeFunctionInvoke.mockImplementation(async (_name, { body }) => ({
+      data: {
+        commandId: body.commandId,
+        status: "succeeded",
+        result: {
+          planId: "00000000-0000-4000-8000-000000000020",
+          userId: "user-1",
+          document: weeklyPlanFixture,
+          schemaVersion: 1,
+          revision: 0,
+          isActive: true,
+          createdAt: "2026-07-27T10:00:00.000Z",
+          updatedAt: "2026-07-27T10:00:00.000Z",
+          deactivatedAt: null,
+          predecessorPlanId: null,
+          generationId: body.commandId,
+        },
+        error: null,
+      },
+      error: null,
+    }));
     const user = userEvent.setup();
     render(<App />);
 
@@ -136,16 +156,110 @@ describe("application generation flow", () => {
 
     expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
     expect(edgeFunctionInvoke).toHaveBeenCalledWith("generate-meal-plan", expect.objectContaining({
-      body: expect.objectContaining({ action: "plan" }),
+      body: expect.objectContaining({
+        action: "plan",
+        commandId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+      }),
     }));
-    expect(createCurrent).toHaveBeenCalledWith({
-      commandId: expect.any(String),
-      userId: "user-1",
-      document: weeklyPlanFixture,
-      profile: expect.objectContaining({ age: 30 }),
-      milestones: [],
-    });
-    expect(saveProfileData).not.toHaveBeenCalled();
+    expect(createCurrent).not.toHaveBeenCalled();
+    expect(saveProfileData).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ age: 30 }),
+      [],
+    );
+    expect(screen.getByText("Current Weekly Plan synchronized")).toBeInTheDocument();
+  });
+
+  it("retries an unknown initial-generation outcome with the same command ID", async () => {
+    edgeFunctionInvoke
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: "connection reset" },
+      })
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000020",
+            userId: "user-1",
+            document: weeklyPlanFixture,
+            schemaVersion: 1,
+            revision: 0,
+            isActive: true,
+            createdAt: "2026-07-27T10:00:00.000Z",
+            updatedAt: "2026-07-27T10:00:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: null,
+            generationId: body.commandId,
+          },
+          error: null,
+        },
+        error: null,
+      }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Let's build your plan." });
+    await user.click(screen.getByRole("button", { name: "Generate Meal Plan" }));
+    expect(await screen.findByText("connection reset")).toBeInTheDocument();
+    const firstCommandId = edgeFunctionInvoke.mock.calls[0][1].body.commandId;
+
+    await user.click(screen.getByRole("button", { name: "Generate Meal Plan" }));
+
+    expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId).toBe(firstCommandId);
+  });
+
+  it("uses a new command ID after a confirmed terminal generation failure", async () => {
+    edgeFunctionInvoke
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "failed",
+          result: null,
+          error: {
+            code: "generation_failed",
+            message: "A valid Current Weekly Plan was not created.",
+            retryable: false,
+          },
+        },
+        error: null,
+      }))
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000020",
+            userId: "user-1",
+            document: weeklyPlanFixture,
+            schemaVersion: 1,
+            revision: 0,
+            isActive: true,
+            createdAt: "2026-07-27T10:00:00.000Z",
+            updatedAt: "2026-07-27T10:00:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: null,
+            generationId: body.commandId,
+          },
+          error: null,
+        },
+        error: null,
+      }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Let's build your plan." });
+    await user.click(screen.getByRole("button", { name: "Generate Meal Plan" }));
+    expect(await screen.findByText("A valid Current Weekly Plan was not created."))
+      .toBeInTheDocument();
+    const failedCommandId = edgeFunctionInvoke.mock.calls[0][1].body.commandId;
+
+    await user.click(screen.getByRole("button", { name: "Generate Meal Plan" }));
+
+    expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId).not.toBe(failedCommandId);
   });
 
   it("rerolls a meal through the same Edge Function boundary", async () => {
