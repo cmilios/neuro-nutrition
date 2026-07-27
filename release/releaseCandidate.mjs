@@ -5,6 +5,8 @@ import path from "node:path";
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const portable = (value) => value.split(path.sep).join("/");
 
+export const PRODUCTION_PROJECT_REF = "cmayisxvronrwvzhyuer";
+
 export const REQUIRED_REHEARSAL_CHECKS = Object.freeze([
   "manifest-integrity",
   "sanitized-legacy-fixtures",
@@ -56,6 +58,16 @@ async function pinFiles(root, relativeDirectory, include) {
   );
 }
 
+async function functionNames(root) {
+  const entries = await readdir(path.join(root, "supabase/functions"), {
+    withFileTypes: true,
+  });
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
+    .map((entry) => entry.name)
+    .sort();
+}
+
 function candidateIdentity(manifestWithoutIdentity) {
   return sha256(`${JSON.stringify(manifestWithoutIdentity)}\n`);
 }
@@ -74,6 +86,9 @@ export async function createReleaseManifest({
   if (!targetProjectRef || !targetRegion) {
     throw new Error("An isolated target project ref and region are required.");
   }
+  if (targetProjectRef === PRODUCTION_PROJECT_REF) {
+    throw new Error("Release candidates must target an isolated project.");
+  }
 
   const migrations = await pinFiles(
     root,
@@ -82,6 +97,21 @@ export async function createReleaseManifest({
   );
   const frontendFiles = await pinFiles(root, "dist");
   const edgeFunctions = [];
+  const discoveredFunctions = await functionNames(root);
+  const suppliedFunctions = Object.keys(functionVersions).sort();
+  const missingFunctions = discoveredFunctions.filter(
+    (name) => !suppliedFunctions.includes(name),
+  );
+  const unknownFunctions = suppliedFunctions.filter(
+    (name) => !discoveredFunctions.includes(name),
+  );
+  if (missingFunctions.length || unknownFunctions.length) {
+    throw new Error(
+      `Edge Function versions must exactly match the source tree. Missing: ${
+        missingFunctions.join(", ") || "none"
+      }; unknown: ${unknownFunctions.join(", ") || "none"}.`,
+    );
+  }
 
   for (const [name, version] of Object.entries(functionVersions).sort()) {
     if (!version) {
@@ -143,6 +173,20 @@ export async function verifyReleaseManifest(root, manifest, { actualCommit } = {
       mismatches.push(pinned.path);
     }
   }
+  for (const edgeFunction of manifest.edgeFunctions) {
+    if (
+      sha256(`${JSON.stringify(edgeFunction.files)}\n`) !==
+      edgeFunction.sourceSha256
+    ) {
+      mismatches.push(`supabase/functions/${edgeFunction.name}:sourceSha256`);
+    }
+  }
+  if (
+    sha256(`${JSON.stringify(manifest.frontend.files)}\n`) !==
+    manifest.frontend.artifactSha256
+  ) {
+    mismatches.push("frontend.artifactSha256");
+  }
 
   const actualDeployablePaths = [
     ...(await filesUnder(
@@ -159,6 +203,20 @@ export async function verifyReleaseManifest(root, manifest, { actualCommit } = {
     ).flat(),
     ...(await filesUnder(root, "dist")),
   ];
+  const actualFunctionNames = await functionNames(root);
+  const pinnedFunctionNames = manifest.edgeFunctions
+    .map((entry) => entry.name)
+    .sort();
+  for (const name of actualFunctionNames) {
+    if (!pinnedFunctionNames.includes(name)) {
+      mismatches.push(`supabase/functions/${name}`);
+    }
+  }
+  for (const name of pinnedFunctionNames) {
+    if (!actualFunctionNames.includes(name)) {
+      mismatches.push(`supabase/functions/${name}`);
+    }
+  }
   const pinnedPaths = new Set(pinnedFiles.map((entry) => entry.path));
   for (const actualPath of actualDeployablePaths) {
     if (!pinnedPaths.has(actualPath)) mismatches.push(actualPath);
@@ -176,22 +234,54 @@ export async function verifyReleaseManifest(root, manifest, { actualCommit } = {
   };
 }
 
-export function createRehearsalReport({
+export async function createRehearsalReport({
+  root,
   candidateId,
   targetProjectRef,
-  productionProjectRef,
   manifestValid,
   results,
   completedAt = new Date().toISOString(),
 }) {
-  if (targetProjectRef === productionProjectRef) {
+  if (targetProjectRef === PRODUCTION_PROJECT_REF) {
     throw new Error(
       "Release rehearsal requires an isolated project, never production.",
     );
   }
+  if (!/^[0-9a-f]{64}$/.test(candidateId)) {
+    throw new Error("Candidate ID must be a SHA-256 digest.");
+  }
 
+  const evidenceRoot = path.resolve(root, "release", "evidence", candidateId);
+  const pinnedResults = await Promise.all(
+    results.map(async (result) => {
+      const evidence = [];
+      const evidenceErrors = [];
+      for (const relativeEvidencePath of result.evidence ?? []) {
+        const absoluteEvidencePath = path.resolve(
+          evidenceRoot,
+          relativeEvidencePath,
+        );
+        if (
+          absoluteEvidencePath !== evidenceRoot &&
+          !absoluteEvidencePath.startsWith(`${evidenceRoot}${path.sep}`)
+        ) {
+          evidenceErrors.push(`${relativeEvidencePath}: outside candidate`);
+          continue;
+        }
+        try {
+          evidence.push({
+            path: portable(path.relative(root, absoluteEvidencePath)),
+            sha256: sha256(await readFile(absoluteEvidencePath)),
+          });
+        } catch {
+          evidenceErrors.push(`${relativeEvidencePath}: unreadable`);
+        }
+      }
+      return { ...result, evidence, evidenceErrors };
+    }),
+  );
   const resultsByCheck = new Map(
-    results.map((result) => [result.check, result]),
+    pinnedResults.map((result) => [result.check, result]),
   );
   const missingOrFailedChecks = REQUIRED_REHEARSAL_CHECKS.filter((check) => {
     const result = resultsByCheck.get(check);
@@ -199,7 +289,8 @@ export function createRehearsalReport({
       !result ||
       result.status !== "passed" ||
       !Array.isArray(result.evidence) ||
-      result.evidence.length === 0
+      result.evidence.length === 0 ||
+      result.evidenceErrors.length > 0
     );
   });
   if (!manifestValid) missingOrFailedChecks.unshift("manifest-integrity");
@@ -210,10 +301,10 @@ export function createRehearsalReport({
     candidateId,
     completedAt,
     targetProjectRef,
-    productionProjectRef,
+    productionProjectRef: PRODUCTION_PROJECT_REF,
     productionAuthorityChanged: false,
     decision: uniqueFailures.length === 0 ? "go" : "no-go",
     missingOrFailedChecks: uniqueFailures,
-    results,
+    results: pinnedResults,
   };
 }

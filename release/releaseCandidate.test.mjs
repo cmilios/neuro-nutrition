@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  PRODUCTION_PROJECT_REF,
   REQUIRED_REHEARSAL_CHECKS,
   createRehearsalReport,
   createReleaseManifest,
@@ -72,6 +73,15 @@ describe("immutable release candidate manifest", () => {
       valid: false,
       mismatches: ["source.commit"],
     });
+    await expect(
+      createReleaseManifest({
+        root,
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        targetProjectRef: "isolated-project",
+        targetRegion: "eu-west-1",
+        functionVersions: {},
+      }),
+    ).rejects.toThrow("generate-meal-plan");
 
     await writeFile(
       path.join(root, "supabase", "migrations", "001.sql"),
@@ -86,55 +96,81 @@ describe("immutable release candidate manifest", () => {
 });
 
 describe("release rehearsal decision", () => {
-  it("fails closed until every required scenario has reviewable passing evidence", () => {
+  it("fails closed until every required scenario has candidate-bound evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "release-evidence-"));
+    const candidateId = "a".repeat(64);
+    const evidenceDirectory = path.join(
+      root,
+      "release",
+      "evidence",
+      candidateId,
+    );
+    await mkdir(evidenceDirectory, { recursive: true });
     const passingResults = REQUIRED_REHEARSAL_CHECKS.map((check) => ({
       check,
       status: "passed",
-      evidence: [`evidence/${check}.json`],
+      evidence: [`${check}.json`],
     }));
+    for (const { check } of passingResults) {
+      await writeFile(
+        path.join(evidenceDirectory, `${check}.json`),
+        `${JSON.stringify({ check, passed: true })}\n`,
+      );
+    }
 
-    expect(
+    await expect(
       createRehearsalReport({
-        candidateId: "candidate-id",
+        root,
+        candidateId,
         targetProjectRef: "isolated-project",
-        productionProjectRef: "production-project",
         manifestValid: true,
         results: passingResults,
         completedAt: "2026-07-27T13:00:00.000Z",
       }),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       decision: "go",
       productionAuthorityChanged: false,
       missingOrFailedChecks: [],
+      results: expect.arrayContaining([
+        expect.objectContaining({
+          check: "manifest-integrity",
+          evidence: [
+            {
+              path: `release/evidence/${candidateId}/manifest-integrity.json`,
+              sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+            },
+          ],
+        }),
+      ]),
     });
 
-    expect(
+    await expect(
       createRehearsalReport({
-        candidateId: "candidate-id",
+        root,
+        candidateId,
         targetProjectRef: "isolated-project",
-        productionProjectRef: "production-project",
         manifestValid: true,
         results: passingResults.filter(
           ({ check }) => check !== "recovery-point-restored",
         ),
         completedAt: "2026-07-27T13:00:00.000Z",
       }),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       decision: "no-go",
       missingOrFailedChecks: ["recovery-point-restored"],
       productionAuthorityChanged: false,
     });
   });
 
-  it("refuses to rehearse against the production project", () => {
-    expect(() =>
+  it("refuses to rehearse against the production project", async () => {
+    await expect(
       createRehearsalReport({
-        candidateId: "candidate-id",
-        targetProjectRef: "production-project",
-        productionProjectRef: "production-project",
+        root: ".",
+        candidateId: "a".repeat(64),
+        targetProjectRef: PRODUCTION_PROJECT_REF,
         manifestValid: true,
         results: [],
       }),
-    ).toThrow("isolated");
+    ).rejects.toThrow("isolated");
   });
 });

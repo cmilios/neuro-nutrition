@@ -44,11 +44,21 @@ wrong-owner, and canonical-mismatch fixtures. Apply the pinned migrations,
 deploy the pinned function source, and publish the pinned frontend artifact.
 
 Capture machine-readable command output, SQL query results, screenshots, and
-request/response envelopes under `release/evidence/<candidate-id>/`. Evidence
+request/response envelopes under the manifest's
+`release/evidence/<candidate-id>/` directory. Paths recorded in the results file
+are relative to that directory. Evidence
 must contain no credentials, prompts, Weekly Plan contents, ingredients, raw
 exceptions, or production user data.
 
-Exercise every check in `rehearsal-results.example.json`:
+Generate the candidate-bound checklist from the gate's authoritative catalogue:
+
+```powershell
+node release/cli.mjs template `
+  --manifest release/evidence/release-manifest.json `
+  --out release/evidence/rehearsal-results.json
+```
+
+Exercise every generated check:
 
 - Prove invalid documents and source/destination count, ownership, and
   canonical-content mismatches abort the transaction, preserve source rows and
@@ -77,19 +87,17 @@ then compare migration inventory, user ownership, Current Weekly Plan
 invariants, and rollout state with the source snapshot. Record separate evidence
 for `recovery-point-created` and `recovery-point-restored`.
 
-Retain the recovery point through the 24-hour observation window plus seven
-days. Do not put exports or credentials in this repository.
+Do not put exports or credentials in this repository.
 
 ## 4. Record the decision
 
-Copy the example results to a candidate-specific file, update statuses and
-evidence paths, then create the report:
+Update the generated results with statuses and candidate-relative evidence
+paths, then create the report:
 
 ```powershell
 node release/cli.mjs report `
   --manifest release/evidence/release-manifest.json `
   --results release/evidence/rehearsal-results.json `
-  --production-project-ref cmayisxvronrwvzhyuer `
   --out release/evidence/rehearsal-report.json
 ```
 

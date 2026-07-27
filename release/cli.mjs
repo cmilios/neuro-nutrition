@@ -7,6 +7,7 @@ import process from "node:process";
 import { parseArgs, promisify } from "node:util";
 
 import {
+  REQUIRED_REHEARSAL_CHECKS,
   createRehearsalReport,
   createReleaseManifest,
   verifyReleaseManifest,
@@ -91,6 +92,26 @@ try {
       functionVersions,
     });
     await writeJson(requireValue(values, "out"), manifest);
+  } else if (command === "template") {
+    const { values } = parseArgs({
+      args,
+      options: {
+        manifest: { type: "string" },
+        out: { type: "string" },
+      },
+    });
+    const manifest = await readJson(requireValue(values, "manifest"));
+    if (!/^[0-9a-f]{64}$/.test(manifest.candidateId)) {
+      throw new Error("Manifest has an invalid candidate ID.");
+    }
+    await writeJson(
+      requireValue(values, "out"),
+      REQUIRED_REHEARSAL_CHECKS.map((check) => ({
+        check,
+        status: "blocked",
+        evidence: [],
+      })),
+    );
   } else if (command === "verify") {
     const { values } = parseArgs({
       args,
@@ -109,7 +130,6 @@ try {
       options: {
         manifest: { type: "string" },
         results: { type: "string" },
-        "production-project-ref": { type: "string" },
         out: { type: "string" },
       },
     });
@@ -117,17 +137,19 @@ try {
     const verification = await verifyReleaseManifest(root, manifest, {
       actualCommit: await currentCommit(),
     });
-    const report = createRehearsalReport({
+    const report = await createRehearsalReport({
+      root,
       candidateId: manifest.candidateId,
       targetProjectRef: manifest.target.projectRef,
-      productionProjectRef: requireValue(values, "production-project-ref"),
       manifestValid: verification.valid,
       results: await readJson(requireValue(values, "results")),
     });
     await writeJson(requireValue(values, "out"), report);
     if (report.decision !== "go") process.exitCode = 1;
   } else {
-    throw new Error("Usage: release/cli.mjs <manifest|verify|report> [options]");
+    throw new Error(
+      "Usage: release/cli.mjs <manifest|template|verify|report> [options]",
+    );
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : error}\n`);
