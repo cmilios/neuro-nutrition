@@ -128,6 +128,40 @@ as $$
     = (select count(distinct identity) from identities);
 $$;
 
+create or replace function private.strip_ingredient_identities(value jsonb)
+returns jsonb
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  stripped jsonb := value;
+  day_index integer;
+  meal_type text;
+  meal_value jsonb;
+begin
+  if jsonb_typeof(value -> 'days') is distinct from 'array' then
+    return value;
+  end if;
+
+  for day_index in 0..jsonb_array_length(value -> 'days') - 1
+  loop
+    foreach meal_type in array array['breakfast', 'lunch', 'dinner', 'snack']
+    loop
+      meal_value = stripped #> array['days', day_index::text, meal_type];
+      meal_value = meal_value - 'ingredientIds' - 'checkedIngredientIds';
+      stripped = jsonb_set(
+        stripped,
+        array['days', day_index::text, meal_type],
+        meal_value
+      );
+    end loop;
+  end loop;
+
+  return stripped;
+end;
+$$;
+
 create or replace function private.normalize_weekly_plan_ingredient_identities()
 returns trigger
 language plpgsql
@@ -137,14 +171,29 @@ declare
   day_index integer;
   meal_type text;
   meal_value jsonb;
+  old_meal_value jsonb;
 begin
   if tg_op = 'INSERT' then
+    new.document = private.strip_ingredient_identities(new.document);
+  else
     for day_index in 0..jsonb_array_length(new.document -> 'days') - 1
     loop
       foreach meal_type in array array['breakfast', 'lunch', 'dinner', 'snack']
       loop
         meal_value = new.document #> array['days', day_index::text, meal_type];
-        meal_value = meal_value - 'ingredientIds' - 'checkedIngredientIds';
+        old_meal_value = old.document #> array['days', day_index::text, meal_type];
+        if meal_value -> 'ingredients' = old_meal_value -> 'ingredients'
+          and jsonb_typeof(old_meal_value -> 'ingredientIds') = 'array'
+        then
+          meal_value = jsonb_set(
+            meal_value,
+            '{ingredientIds}',
+            old_meal_value -> 'ingredientIds',
+            true
+          );
+        else
+          meal_value = meal_value - 'ingredientIds' - 'checkedIngredientIds';
+        end if;
         new.document = jsonb_set(
           new.document,
           array['days', day_index::text, meal_type],
@@ -158,18 +207,19 @@ begin
 end;
 $$;
 
+update public.weekly_plans
+set document = private.ensure_ingredient_identities(
+      private.strip_ingredient_identities(document)
+    ),
+    revision = revision + 1,
+    updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond')
+where document is distinct from private.ensure_ingredient_identities(
+  private.strip_ingredient_identities(document)
+);
+
 create trigger weekly_plans_add_ingredient_identities
 before insert or update of document on public.weekly_plans
 for each row execute function private.normalize_weekly_plan_ingredient_identities();
-
-update public.weekly_plans
-set document = private.ensure_ingredient_identities(document),
-    revision = revision + 1,
-    updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond')
-where not private.has_stable_ingredient_identities(
-  private.ensure_ingredient_identities(document)
-)
-or document is distinct from private.ensure_ingredient_identities(document);
 
 alter table public.weekly_plans
   drop constraint weekly_plans_valid_document;
@@ -491,6 +541,8 @@ revoke all on function private.ensure_ingredient_identities(jsonb)
   from public, anon, authenticated;
 revoke all on function private.has_stable_ingredient_identities(jsonb)
   from public, anon, authenticated;
+revoke all on function private.strip_ingredient_identities(jsonb)
+  from public, anon, authenticated;
 revoke all on function private.normalize_weekly_plan_ingredient_identities()
   from public, anon, authenticated;
 revoke all on function private.authoritative_weekly_plan_row(public.weekly_plans)
@@ -503,6 +555,8 @@ revoke all on function private.fail_ingredient_progress_command(
 grant execute on function private.ensure_ingredient_identities(jsonb)
   to service_role;
 grant execute on function private.has_stable_ingredient_identities(jsonb)
+  to service_role;
+grant execute on function private.strip_ingredient_identities(jsonb)
   to service_role;
 grant execute on function private.normalize_weekly_plan_ingredient_identities()
   to service_role;

@@ -36,6 +36,11 @@ type PlanState = {
         ingredientIds: string[];
         checkedIngredientIds: string[];
       };
+      lunch: {
+        ingredients: string[];
+        ingredientIds: string[];
+        checkedIngredientIds: string[];
+      };
     }>;
   };
 };
@@ -141,6 +146,8 @@ describe("ingredient progress database command", () => {
       breakfast.ingredientIds[0],
       breakfast.ingredientIds[1],
     ]);
+    expect(plan.document.days[0].lunch.ingredientIds[0])
+      .not.toBe(weeklyPlanFixture.days[0].lunch.ingredientIds[0]);
   });
 
   it("replaces supplied identities when the server inserts a new plan", async () => {
