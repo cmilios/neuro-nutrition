@@ -12,6 +12,7 @@ import { UserProfile, MealPlan, User, DayPlan, Meal, MealFeedback, Milestone } f
 import { generateMealPlan, regenerateSingleMeal } from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
+import { weeklyPlanGateway } from './services/weeklyPlanGateway';
 import { supabase } from './services/supabaseClient';
 
 const App: React.FC = () => {
@@ -58,6 +59,36 @@ const App: React.FC = () => {
 
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error && err.message ? err.message : fallback;
+
+  const saveCurrentWeeklyPlan = async (userId: string, document: MealPlan) => {
+    const outcome = await weeklyPlanGateway.saveCurrent({
+      commandId: crypto.randomUUID(),
+      userId,
+      document,
+    });
+
+    if (outcome.status !== 'succeeded') {
+      throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
+    }
+  };
+
+  const createCurrentWeeklyPlan = async (
+    userId: string,
+    document: MealPlan,
+    submittedProfile: UserProfile,
+  ) => {
+    const outcome = await weeklyPlanGateway.createCurrent({
+      commandId: crypto.randomUUID(),
+      userId,
+      document,
+      profile: submittedProfile,
+      milestones,
+    });
+
+    if (outcome.status !== 'succeeded') {
+      throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
+    }
+  };
 
   // Keep auth callbacks synchronous. Calling another Supabase API from an async
   // onAuthStateChange callback can deadlock supabase-js.
@@ -115,11 +146,15 @@ const App: React.FC = () => {
     setMealPlan(null);
     setMilestones([]);
 
-    storageService.getUserData(user.id)
-      .then((data) => {
+    storageService.getProfileData(user.id)
+      .then(async (data) => ({
+        data,
+        currentPlan: await weeklyPlanGateway.getCurrent(user.id),
+      }))
+      .then(({ data, currentPlan }) => {
         if (cancelled || loadedUserIdRef.current !== user.id) return;
         setProfile(data?.profile ?? null);
-        setMealPlan(data?.mealPlan ?? null);
+        setMealPlan(currentPlan?.document ?? null);
         setMilestones(data?.milestones ?? []);
       })
       .catch((loadError) => {
@@ -171,7 +206,7 @@ const App: React.FC = () => {
       const generatedPlan = await generateMealPlan(data);
       setMealPlan(generatedPlan);
       try {
-        await storageService.saveUserData(user.id, data, generatedPlan, milestones);
+        await createCurrentWeeklyPlan(user.id, generatedPlan, data);
       } catch (saveError) {
         console.error('Plan generated but failed to save:', saveError);
         setError('Your plan was generated, but it could not be synced. Please try again before leaving this page.');
@@ -187,7 +222,7 @@ const App: React.FC = () => {
   const handleUpdateProfile = async (updatedProfile: UserProfile) => {
     if (!user || !mealPlan) return;
     try {
-      await storageService.saveUserData(user.id, updatedProfile, mealPlan, milestones);
+      await storageService.saveProfileData(user.id, updatedProfile, milestones);
       setProfile(updatedProfile);
     } catch (saveError) {
       console.error('Failed to update profile:', saveError);
@@ -209,7 +244,7 @@ const App: React.FC = () => {
     const updatedMilestones = [...milestones, newMilestone];
     const updatedProfile = { ...profile, weightKg: weight };
     try {
-      await storageService.saveUserData(user.id, updatedProfile, mealPlan, updatedMilestones);
+      await storageService.saveProfileData(user.id, updatedProfile, updatedMilestones);
       setMilestones(updatedMilestones);
       setProfile(updatedProfile);
     } catch (saveError) {
@@ -222,7 +257,7 @@ const App: React.FC = () => {
     if (!user || !profile || !mealPlan) return;
     const updatedMilestones = milestones.filter(m => m.id !== id);
     try {
-      await storageService.saveUserData(user.id, profile, mealPlan, updatedMilestones);
+      await storageService.saveProfileData(user.id, profile, updatedMilestones);
       setMilestones(updatedMilestones);
     } catch (saveError) {
       console.error('Failed to delete milestone:', saveError);
@@ -262,7 +297,7 @@ const App: React.FC = () => {
       updatedDays[dayIndex] = targetDay;
       const updatedPlan = { ...mealPlan, days: updatedDays };
 
-      await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+      await saveCurrentWeeklyPlan(user.id, updatedPlan);
       setMealPlan(updatedPlan);
       setRerollRetry(null);
 
@@ -301,7 +336,7 @@ const App: React.FC = () => {
     const updatedPlan = { ...mealPlan, days: updatedDays };
     setMealPlan(updatedPlan);
     try {
-      await storageService.saveUserData(user.id, profile, updatedPlan, milestones);
+      await saveCurrentWeeklyPlan(user.id, updatedPlan);
     } catch (saveError) {
       console.error('Failed to save ingredient state:', saveError);
       setMealPlan(mealPlan);
@@ -312,7 +347,13 @@ const App: React.FC = () => {
   const handleReset = async () => {
     if (!user) return;
     try {
-      await storageService.clearUserData(user.id);
+      const outcome = await weeklyPlanGateway.startOver({
+        commandId: crypto.randomUUID(),
+        userId: user.id,
+      });
+      if (outcome.status !== 'succeeded') {
+        throw new Error(outcome.error?.message || 'Start Over did not succeed.');
+      }
       setProfile(null);
       setMealPlan(null);
       setMilestones([]);
@@ -344,7 +385,7 @@ const App: React.FC = () => {
         request.currentPlan,
         request.reviewType,
       );
-      await storageService.saveUserData(user.id, profile, generatedPlan, milestones);
+      await saveCurrentWeeklyPlan(user.id, generatedPlan);
       setMealPlan(generatedPlan);
       setNextWeekRetry(null);
     } catch (err) {

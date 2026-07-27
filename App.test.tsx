@@ -1,12 +1,24 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { weeklyPlanFixture } from "./test/weeklyPlanFixture";
 
-const { edgeFunctionInvoke, getUserData, saveUserData } = vi.hoisted(() => ({
+const {
+  edgeFunctionInvoke,
+  getProfileData,
+  saveProfileData,
+  getCurrent,
+  createCurrent,
+  saveCurrent,
+  startOver,
+} = vi.hoisted(() => ({
   edgeFunctionInvoke: vi.fn(),
-  getUserData: vi.fn(),
-  saveUserData: vi.fn(),
+  getProfileData: vi.fn(),
+  saveProfileData: vi.fn(),
+  getCurrent: vi.fn(),
+  createCurrent: vi.fn(),
+  saveCurrent: vi.fn(),
+  startOver: vi.fn(),
 }));
 
 vi.mock("./services/supabaseClient", () => ({
@@ -28,9 +40,17 @@ vi.mock("./services/supabaseClient", () => ({
 
 vi.mock("./services/storageService", () => ({
   storageService: {
-    getUserData,
-    saveUserData,
-    clearUserData: vi.fn(),
+    getProfileData,
+    saveProfileData,
+  },
+}));
+
+vi.mock("./services/weeklyPlanGateway", () => ({
+  weeklyPlanGateway: {
+    getCurrent,
+    createCurrent,
+    saveCurrent,
+    startOver,
   },
 }));
 
@@ -43,8 +63,54 @@ import App from "./App";
 describe("application generation flow", () => {
   beforeEach(() => {
     edgeFunctionInvoke.mockReset();
-    getUserData.mockReset().mockResolvedValue(null);
-    saveUserData.mockReset().mockResolvedValue(undefined);
+    getProfileData.mockReset().mockResolvedValue(null);
+    saveProfileData.mockReset().mockResolvedValue(undefined);
+    getCurrent.mockReset().mockImplementation(async () => {
+      const loadedData = await getProfileData.mock.results.at(-1)?.value;
+      return loadedData?.mealPlan ? { document: loadedData.mealPlan } : null;
+    });
+    createCurrent.mockReset().mockImplementation(async ({ commandId, userId, document }) => ({
+      commandId,
+      status: "succeeded",
+      result: {
+        planId: `legacy:${userId}`,
+        userId,
+        document,
+        schemaVersion: 1,
+        revision: 0,
+        isActive: true,
+        createdAt: null,
+        updatedAt: null,
+        deactivatedAt: null,
+        predecessorPlanId: null,
+        generationId: null,
+      },
+      error: null,
+    }));
+    saveCurrent.mockReset().mockImplementation(async ({ commandId, userId, document }) => ({
+      commandId,
+      status: "succeeded",
+      result: {
+        planId: `legacy:${userId}`,
+        userId,
+        document,
+        schemaVersion: 1,
+        revision: 0,
+        isActive: true,
+        createdAt: null,
+        updatedAt: null,
+        deactivatedAt: null,
+        predecessorPlanId: null,
+        generationId: null,
+      },
+      error: null,
+    }));
+    startOver.mockReset().mockImplementation(async ({ commandId }) => ({
+      commandId,
+      status: "succeeded",
+      result: null,
+      error: null,
+    }));
   });
 
   it("generates and renders the returned Weekly Plan", async () => {
@@ -53,18 +119,21 @@ describe("application generation flow", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Let's build your plan." });
+    await waitFor(() => expect(getCurrent).toHaveBeenCalledWith("user-1"));
     await user.click(screen.getByRole("button", { name: "Generate Meal Plan" }));
 
     expect(await screen.findByText("Test Berry Breakfast")).toBeInTheDocument();
     expect(edgeFunctionInvoke).toHaveBeenCalledWith("generate-meal-plan", expect.objectContaining({
       body: expect.objectContaining({ action: "plan" }),
     }));
-    expect(saveUserData).toHaveBeenCalledWith(
-      "user-1",
-      expect.objectContaining({ age: 30 }),
-      weeklyPlanFixture,
-      [],
-    );
+    expect(createCurrent).toHaveBeenCalledWith({
+      commandId: expect.any(String),
+      userId: "user-1",
+      document: weeklyPlanFixture,
+      profile: expect.objectContaining({ age: 30 }),
+      milestones: [],
+    });
+    expect(saveProfileData).not.toHaveBeenCalled();
   });
 
   it("rerolls a meal through the same Edge Function boundary", async () => {
@@ -77,7 +146,7 @@ describe("application generation flow", () => {
       goal: "Lose Weight",
       dietType: "Mediterranean",
     };
-    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     const rerolledMeal = {
       ...weeklyPlanFixture.days[0].breakfast,
       name: "Rerolled Breakfast",
@@ -98,25 +167,141 @@ describe("application generation flow", () => {
         currentMeal: weeklyPlanFixture.days[0].breakfast,
       }),
     });
-    expect(saveUserData).toHaveBeenCalledWith(
-      "user-1",
-      profile,
+    expect(saveCurrent).toHaveBeenCalledWith(
       expect.objectContaining({
+        userId: "user-1",
+        document: expect.objectContaining({
+          days: expect.arrayContaining([
+            expect.objectContaining({
+              breakfast: rerolledMeal,
+              lunch: weeklyPlanFixture.days[0].lunch,
+              dailySummary: {
+                calories: 1650,
+                protein: 125,
+                carbs: 162,
+                fats: 50,
+              },
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("persists ingredient progress through the Weekly Plan gateway", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByText("Test Berry Breakfast"));
+    await user.click(screen.getAllByText("ingredient").at(-1)!);
+
+    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "user-1",
+      document: expect.objectContaining({
         days: expect.arrayContaining([
           expect.objectContaining({
-            breakfast: rerolledMeal,
-            lunch: weeklyPlanFixture.days[0].lunch,
-            dailySummary: {
-              calories: 1650,
-              protein: 125,
-              carbs: 162,
-              fats: 50,
-            },
+            breakfast: expect.objectContaining({
+              checkedIngredients: ["ingredient"],
+            }),
           }),
         ]),
       }),
+    }));
+    expect(saveProfileData).not.toHaveBeenCalled();
+  });
+
+  it("restores confirmed ingredient progress when gateway persistence fails", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    saveCurrent.mockResolvedValueOnce({
+      commandId: "command-failed",
+      status: "failed",
+      result: null,
+      error: {
+        code: "weekly_plan_persistence_failed",
+        message: "storage unavailable",
+        retryable: true,
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByText("Test Berry Breakfast"));
+    await user.click(screen.getAllByText("ingredient").at(-1)!);
+    expect(await screen.findByText("Could not save that ingredient change. Please try again."))
+      .toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close Details" }));
+    await user.click(screen.getByText("Test Berry Breakfast"));
+    expect(screen.getAllByText("ingredient").at(-1)?.parentElement)
+      .not.toHaveClass("line-through");
+  });
+
+  it("persists profile and milestone changes without rewriting the Weekly Plan", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByTitle("My Profile & Settings"));
+    const ageInput = screen.getAllByRole("spinbutton")[0];
+    await user.clear(ageInput);
+    await user.type(ageInput, "31");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    await waitFor(() => expect(saveProfileData).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ age: 31 }),
       [],
-    );
+    ));
+
+    await user.click(screen.getByTitle("My Profile & Settings"));
+    await user.click(screen.getByRole("button", { name: "Milestones" }));
+    const milestoneWeight = screen.getAllByRole("spinbutton")[0];
+    await user.clear(milestoneWeight);
+    await user.type(milestoneWeight, "74");
+    await user.click(screen.getByRole("button", { name: "Log" }));
+
+    await waitFor(() => expect(saveProfileData).toHaveBeenLastCalledWith(
+      "user-1",
+      expect.objectContaining({ age: 31, weightKg: 74 }),
+      [expect.objectContaining({ weight: 74 })],
+    ));
+
+    await user.click(screen.getByTitle("Delete Entry"));
+    await waitFor(() => expect(saveProfileData).toHaveBeenLastCalledWith(
+      "user-1",
+      expect.objectContaining({ age: 31, weightKg: 74 }),
+      [],
+    ));
+    expect(saveCurrent).not.toHaveBeenCalled();
   });
 
   it("preserves the original meal and reuses the in-memory Meal Reroll request through Try Again", async () => {
@@ -134,7 +319,7 @@ describe("application generation flow", () => {
       name: "Successful Retry Breakfast",
       ingredients: ["replacement ingredient"],
     };
-    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     edgeFunctionInvoke
       .mockResolvedValueOnce({
         data: null,
@@ -150,7 +335,7 @@ describe("application generation flow", () => {
     expect(await screen.findByText("A different meal was not created. Your original meal is unchanged."))
       .toBeInTheDocument();
     expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
-    expect(saveUserData).not.toHaveBeenCalled();
+    expect(saveCurrent).not.toHaveBeenCalled();
     const firstRequest = edgeFunctionInvoke.mock.calls[0][1];
     const tryAgain = screen.getByRole("button", { name: "Try Again" });
 
@@ -172,7 +357,7 @@ describe("application generation flow", () => {
       goal: "Lose Weight",
       dietType: "Mediterranean",
     };
-    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     edgeFunctionInvoke.mockResolvedValue({
       data: null,
       error: { message: "A different meal was not created. Your original meal is unchanged." },
@@ -192,7 +377,7 @@ describe("application generation flow", () => {
   });
 
   it("labels Empty and Partial Meal Review actions explicitly", async () => {
-    getUserData.mockResolvedValue({
+    getProfileData.mockResolvedValue({
       profile: {
         age: 30,
         gender: "Male",
@@ -216,7 +401,7 @@ describe("application generation flow", () => {
   });
 
   it("keeps an untouched Generate Next Plan submission as an Empty Meal Review", async () => {
-    getUserData.mockResolvedValue({
+    getProfileData.mockResolvedValue({
       profile: {
         age: 30,
         gender: "Male",
@@ -243,7 +428,7 @@ describe("application generation flow", () => {
   });
 
   it("normalizes untouched Meal Slots when submitting a Partial Meal Review", async () => {
-    getUserData.mockResolvedValue({
+    getProfileData.mockResolvedValue({
       profile: {
         age: 30,
         gender: "Male",
@@ -277,12 +462,10 @@ describe("application generation flow", () => {
     expect(request.feedback.slice(1)).toEqual(expect.arrayContaining([
       expect.objectContaining({ cooked: false, liked: false }),
     ]));
-    expect(saveUserData).toHaveBeenCalledWith(
-      "user-1",
-      expect.any(Object),
-      convergedPlan,
-      [],
-    );
+    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "user-1",
+      document: convergedPlan,
+    }));
   });
 
   it("preserves the current plan and reuses the Empty Meal Review request through Try Again", async () => {
@@ -297,7 +480,7 @@ describe("application generation flow", () => {
     };
     const nextPlan = structuredClone(weeklyPlanFixture);
     nextPlan.days[0].breakfast.name = "Next Week Breakfast";
-    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     edgeFunctionInvoke
       .mockResolvedValueOnce({
         data: null,
@@ -319,14 +502,17 @@ describe("application generation flow", () => {
       reviewType: "empty",
       currentPlan: weeklyPlanFixture,
     }));
-    expect(saveUserData).not.toHaveBeenCalled();
+    expect(saveCurrent).not.toHaveBeenCalled();
 
     await user.click(tryAgain);
 
     expect(await screen.findByText("Next Week Breakfast")).toBeInTheDocument();
     expect(edgeFunctionInvoke.mock.calls[1][1]).toEqual(firstRequest);
     expect(screen.getByRole("button", { name: "Next Week" })).toBeInTheDocument();
-    expect(saveUserData).toHaveBeenCalledWith("user-1", profile, nextPlan, []);
+    expect(saveCurrent).toHaveBeenCalledWith(expect.objectContaining({
+      userId: "user-1",
+      document: nextPlan,
+    }));
   });
 
   it("clears terminal retry state when the application session is refreshed", async () => {
@@ -339,7 +525,7 @@ describe("application generation flow", () => {
       goal: "Lose Weight",
       dietType: "Mediterranean",
     };
-    getUserData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     edgeFunctionInvoke.mockResolvedValue({
       data: null,
       error: { message: "A valid Next Weekly Plan was not created. Your current plan is unchanged." },

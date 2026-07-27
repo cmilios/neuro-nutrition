@@ -75,6 +75,35 @@ export interface MealPlan {
   days: DayPlan[];
 }
 
+export interface AuthoritativeWeeklyPlanRow {
+  planId: string;
+  userId: string;
+  document: MealPlan;
+  schemaVersion: number;
+  revision: number;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  deactivatedAt: string | null;
+  predecessorPlanId: string | null;
+  generationId: string | null;
+}
+
+export type WeeklyPlanCommandStatus = 'succeeded' | 'in_progress' | 'failed';
+
+export interface WeeklyPlanCommandError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface WeeklyPlanCommandOutcome {
+  commandId: string;
+  status: WeeklyPlanCommandStatus;
+  result: AuthoritativeWeeklyPlanRow | null;
+  error: WeeklyPlanCommandError | null;
+}
+
 export interface User {
   id: string;
   email: string;
