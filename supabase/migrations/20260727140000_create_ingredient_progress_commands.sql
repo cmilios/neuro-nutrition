@@ -133,7 +133,26 @@ returns trigger
 language plpgsql
 set search_path = ''
 as $$
+declare
+  day_index integer;
+  meal_type text;
+  meal_value jsonb;
 begin
+  if tg_op = 'INSERT' then
+    for day_index in 0..jsonb_array_length(new.document -> 'days') - 1
+    loop
+      foreach meal_type in array array['breakfast', 'lunch', 'dinner', 'snack']
+      loop
+        meal_value = new.document #> array['days', day_index::text, meal_type];
+        meal_value = meal_value - 'ingredientIds' - 'checkedIngredientIds';
+        new.document = jsonb_set(
+          new.document,
+          array['days', day_index::text, meal_type],
+          meal_value
+        );
+      end loop;
+    end loop;
+  end if;
   new.document = private.ensure_ingredient_identities(new.document);
   return new;
 end;
@@ -233,13 +252,18 @@ security definer
 set search_path = ''
 as $$
 begin
-  insert into public.weekly_plan_commands (
-    command_id, user_id, operation, input_fingerprint, status,
-    error_code, error_message, error_retryable, completed_at
-  ) values (
-    p_command_id, p_user_id, 'set_ingredient_checked', p_fingerprint, 'failed',
-    p_code, p_message, false, clock_timestamp()
-  );
+  update public.weekly_plan_commands
+  set status = 'failed',
+      error_code = p_code,
+      error_message = p_message,
+      error_retryable = false,
+      updated_at = clock_timestamp(),
+      completed_at = clock_timestamp()
+  where command_id = p_command_id
+    and user_id = p_user_id
+    and operation = 'set_ingredient_checked'
+    and input_fingerprint = p_fingerprint
+    and status = 'in_progress';
   return private.ingredient_progress_command_outcome(p_user_id, p_command_id);
 end;
 $$;
@@ -262,22 +286,48 @@ declare
   caller_id uuid := auth.uid();
   fingerprint_source text;
   fingerprint text;
+  inserted_command boolean;
   existing public.weekly_plan_commands;
   plan public.weekly_plans;
   meal_path text[];
   meal_value jsonb;
   checked_identities jsonb;
   next_document jsonb;
-  result_snapshot jsonb;
+  command_result_snapshot jsonb;
 begin
   if caller_id is null then
-    raise exception 'Authentication required';
+    return jsonb_build_object(
+      'commandId', p_command_id,
+      'status', 'failed',
+      'result', null,
+      'error', jsonb_build_object(
+        'code', 'authentication_required',
+        'message', 'Authentication is required.',
+        'retryable', false
+      )
+    );
   end if;
-  if p_displayed_revision < 0
+  if p_command_id is null
+    or p_plan_id is null
+    or p_displayed_revision is null
+    or p_displayed_revision < 0
     or p_day is null
+    or p_day = ''
+    or p_meal_type is null
     or p_meal_type not in ('breakfast', 'lunch', 'dinner', 'snack')
+    or p_ingredient_id is null
+    or p_checked is null
   then
-    raise exception 'Invalid ingredient progress command';
+    return jsonb_build_object(
+      'commandId', p_command_id,
+      'status', 'failed',
+      'result', null,
+      'error', jsonb_build_object(
+        'code', 'invalid_command',
+        'message', 'The ingredient progress command is incomplete or invalid.',
+        'retryable', false
+      )
+    );
   end if;
 
   fingerprint_source = concat_ws(
@@ -291,11 +341,18 @@ begin
   );
   fingerprint = md5(fingerprint_source) || md5('ingredient-progress|' || fingerprint_source);
 
-  select * into existing
-  from public.weekly_plan_commands
-  where command_id = p_command_id;
+  insert into public.weekly_plan_commands (
+    command_id, user_id, operation, input_fingerprint, status
+  ) values (
+    p_command_id, caller_id, 'set_ingredient_checked', fingerprint, 'in_progress'
+  )
+  on conflict (command_id) do nothing
+  returning true into inserted_command;
 
-  if found then
+  if not coalesce(inserted_command, false) then
+    select * into existing
+    from public.weekly_plan_commands
+    where command_id = p_command_id;
     if existing.user_id <> caller_id
       or existing.operation <> 'set_ingredient_checked'
       or existing.input_fingerprint <> fingerprint
@@ -381,7 +438,7 @@ begin
 
   checked_identities = coalesce(meal_value -> 'checkedIngredientIds', '[]'::jsonb);
   if p_checked = (checked_identities ? p_ingredient_id::text) then
-    result_snapshot = private.authoritative_weekly_plan_row(plan);
+    command_result_snapshot = private.authoritative_weekly_plan_row(plan);
   else
     if p_checked then
       checked_identities = checked_identities || to_jsonb(p_ingredient_id::text);
@@ -404,16 +461,20 @@ begin
         updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond')
     where plan_id = plan.plan_id
     returning * into plan;
-    result_snapshot = private.authoritative_weekly_plan_row(plan);
+    command_result_snapshot = private.authoritative_weekly_plan_row(plan);
   end if;
 
-  insert into public.weekly_plan_commands (
-    command_id, user_id, operation, input_fingerprint, status,
-    result_plan_id, result_snapshot, completed_at
-  ) values (
-    p_command_id, caller_id, 'set_ingredient_checked', fingerprint, 'succeeded',
-    plan.plan_id, result_snapshot, clock_timestamp()
-  );
+  update public.weekly_plan_commands
+  set status = 'succeeded',
+      result_plan_id = plan.plan_id,
+      result_snapshot = command_result_snapshot,
+      updated_at = clock_timestamp(),
+      completed_at = clock_timestamp()
+  where command_id = p_command_id
+    and user_id = caller_id
+    and operation = 'set_ingredient_checked'
+    and input_fingerprint = fingerprint
+    and status = 'in_progress';
 
   return private.ingredient_progress_command_outcome(caller_id, p_command_id);
 end;

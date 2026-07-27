@@ -62,6 +62,8 @@ describe("ingredient progress database command", () => {
     ingredientId: string;
     checked: boolean;
     targetPlanId?: string;
+    day?: string;
+    mealType?: string;
   }) => {
     await database.exec(`
       set role authenticated;
@@ -72,8 +74,8 @@ describe("ingredient progress database command", () => {
         select public.set_ingredient_checked(
           '${input.targetPlanId ?? planId}',
           ${input.displayedRevision},
-          'Monday',
-          'breakfast',
+          '${input.day ?? "Monday"}',
+          '${input.mealType ?? "breakfast"}',
           '${input.ingredientId}',
           ${input.checked},
           '${input.commandId}'
@@ -139,6 +141,23 @@ describe("ingredient progress database command", () => {
       breakfast.ingredientIds[0],
       breakfast.ingredientIds[1],
     ]);
+  });
+
+  it("replaces supplied identities when the server inserts a new plan", async () => {
+    const suppliedId = weeklyPlanFixture.days[0].breakfast.ingredientIds[0];
+    const serialized = JSON.stringify(weeklyPlanFixture).replaceAll("'", "''");
+    await database.exec("set role service_role;");
+    try {
+      const result = await database.query<PlanState>(`
+        insert into public.weekly_plans (user_id, document)
+        values ('${userTwo}', '${serialized}'::jsonb)
+        returning plan_id, revision, document
+      `);
+      expect(result.rows[0].document.days[0].breakfast.ingredientIds[0])
+        .not.toBe(suppliedId);
+    } finally {
+      await database.exec("reset role;");
+    }
   });
 
   it("sets one repeated occurrence explicitly and increments revision exactly once", async () => {
@@ -266,5 +285,58 @@ describe("ingredient progress database command", () => {
       error: { code: "stale_plan", retryable: false },
     });
     expect((await currentPlan()).revision).toBe(changed.revision);
+  });
+
+  it("returns structured failures for a busy plan, a missing Meal Slot, and malformed input", async () => {
+    const initial = await currentPlan();
+    const ingredientId = initial.document.days[0].breakfast.ingredientIds[0];
+    await database.exec(`
+      set role service_role;
+      update public.weekly_plans
+      set next_generation_id = '30000000-0000-4000-8000-000000000001',
+          next_generation_locked_at = now()
+      where plan_id = '${planId}';
+      reset role;
+    `);
+    await expect(setIngredientChecked({
+      commandId: commandOne,
+      displayedRevision: initial.revision,
+      ingredientId,
+      checked: false,
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "plan_generation_locked", retryable: false },
+    });
+
+    await database.exec(`
+      set role service_role;
+      update public.weekly_plans
+      set next_generation_id = null,
+          next_generation_locked_at = null
+      where plan_id = '${planId}';
+      reset role;
+    `);
+    await expect(setIngredientChecked({
+      commandId: commandTwo,
+      displayedRevision: initial.revision,
+      ingredientId,
+      checked: false,
+      day: "Funday",
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "meal_slot_not_found", retryable: false },
+    });
+
+    await expect(setIngredientChecked({
+      commandId: commandThree,
+      displayedRevision: initial.revision,
+      ingredientId,
+      checked: false,
+      mealType: "brunch",
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: { code: "invalid_command", retryable: false },
+    });
+    expect((await currentPlan()).revision).toBe(initial.revision);
   });
 });
