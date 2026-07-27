@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { weeklyPlanFixture } from "../../test/weeklyPlanFixture";
 
 const migrationPaths = [
-  "./0001_user_data.sql",
+  "./20260722091747_user_data.sql",
   "./20260722193317_create_ai_usage_records.sql",
   "./20260727120000_create_weekly_plans.sql",
   "./20260727130000_create_initial_generation_commands.sql",
