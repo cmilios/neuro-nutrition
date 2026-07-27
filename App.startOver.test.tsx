@@ -82,7 +82,7 @@ describe("application Start Over flow", () => {
     startOver.mockReset();
   });
 
-  it("clears loaded client state after a successful Start Over command", async () => {
+  it("keeps the loaded plan stale until Start Over is authoritatively confirmed", async () => {
     startOver.mockImplementation(async ({ commandId }) => ({
       commandId,
       status: "succeeded",
@@ -95,7 +95,11 @@ describe("application Start Over flow", () => {
     expect(await screen.findByText("profile-30")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Exercise Start Over" }));
 
-    await waitFor(() => expect(screen.getByText("profile-empty")).toBeInTheDocument());
+    await waitFor(() => {
+      expect(screen.getByText("profile-30")).toBeInTheDocument();
+      expect(screen.getByText("This plan may be out of date.")).toBeInTheDocument();
+      expect(screen.queryByText("Profile form")).not.toBeInTheDocument();
+    });
     expect(startOver).toHaveBeenCalledWith({
       commandId: expect.any(String),
       userId: "user-1",

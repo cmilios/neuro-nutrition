@@ -5,7 +5,10 @@ import type {
   UserProfile,
   WeeklyPlanCommandOutcome,
 } from "../types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { legacyWeeklyPlanStorage } from "./storageService";
+import { supabase } from "./supabaseClient";
+import { requireAuthoritativeWeeklyPlanRow } from "./weeklyPlanValidation";
 
 interface LegacyWeeklyPlanSnapshot {
   plan: MealPlan;
@@ -46,6 +49,58 @@ export interface WeeklyPlanGateway {
   saveCurrent(command: SaveCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
   startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome>;
 }
+
+interface WeeklyPlanDatabaseRow {
+  plan_id: string;
+  user_id: string;
+  document: unknown;
+  schema_version: number;
+  revision: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  deactivated_at: string | null;
+  predecessor_plan_id: string | null;
+  generation_id: string | null;
+}
+
+const authoritativeRow = (row: WeeklyPlanDatabaseRow): AuthoritativeWeeklyPlanRow => ({
+  planId: row.plan_id,
+  userId: row.user_id,
+  document: row.document as MealPlan,
+  schemaVersion: row.schema_version,
+  revision: row.revision,
+  isActive: row.is_active,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  deactivatedAt: row.deactivated_at,
+  predecessorPlanId: row.predecessor_plan_id,
+  generationId: row.generation_id,
+});
+
+export const createAuthoritativeWeeklyPlanReader = (
+  client: Pick<SupabaseClient, "from">,
+) => ({
+  async getCurrent(userId: string): Promise<AuthoritativeWeeklyPlanRow | null> {
+    const { data, error } = await client
+      .from("weekly_plans")
+      .select(`
+        plan_id, user_id, document, schema_version, revision, is_active,
+        created_at, updated_at, deactivated_at, predecessor_plan_id, generation_id
+      `)
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    return requireAuthoritativeWeeklyPlanRow(
+      authoritativeRow(data as WeeklyPlanDatabaseRow),
+      userId,
+    );
+  },
+});
 
 const legacyRow = (
   userId: string,
@@ -135,4 +190,10 @@ export const createWeeklyPlanGateway = (
   },
 });
 
-export const weeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage);
+const legacyWeeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage);
+const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
+
+export const weeklyPlanGateway: WeeklyPlanGateway = {
+  ...legacyWeeklyPlanGateway,
+  getCurrent: authoritativeWeeklyPlanReader.getCurrent,
+};

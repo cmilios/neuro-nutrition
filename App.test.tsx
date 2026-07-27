@@ -67,20 +67,32 @@ describe("application generation flow", () => {
     saveProfileData.mockReset().mockResolvedValue(undefined);
     getCurrent.mockReset().mockImplementation(async () => {
       const loadedData = await getProfileData.mock.results.at(-1)?.value;
-      return loadedData?.mealPlan ? { document: loadedData.mealPlan } : null;
+      return loadedData?.mealPlan ? {
+        planId: "00000000-0000-4000-8000-000000000010",
+        userId: "user-1",
+        document: loadedData.mealPlan,
+        schemaVersion: 1,
+        revision: 0,
+        isActive: true,
+        createdAt: "2026-07-27T10:00:00.000Z",
+        updatedAt: "2026-07-27T10:00:00.000Z",
+        deactivatedAt: null,
+        predecessorPlanId: null,
+        generationId: null,
+      } : null;
     });
     createCurrent.mockReset().mockImplementation(async ({ commandId, userId, document }) => ({
       commandId,
       status: "succeeded",
       result: {
-        planId: `legacy:${userId}`,
+        planId: "00000000-0000-4000-8000-000000000020",
         userId,
         document,
         schemaVersion: 1,
         revision: 0,
         isActive: true,
-        createdAt: null,
-        updatedAt: null,
+        createdAt: "2026-07-27T10:00:00.000Z",
+        updatedAt: "2026-07-27T10:00:00.000Z",
         deactivatedAt: null,
         predecessorPlanId: null,
         generationId: null,
@@ -91,14 +103,14 @@ describe("application generation flow", () => {
       commandId,
       status: "succeeded",
       result: {
-        planId: `legacy:${userId}`,
+        planId: "00000000-0000-4000-8000-000000000020",
         userId,
         document,
         schemaVersion: 1,
         revision: 0,
         isActive: true,
-        createdAt: null,
-        updatedAt: null,
+        createdAt: "2026-07-27T10:00:00.000Z",
+        updatedAt: "2026-07-27T10:00:00.000Z",
         deactivatedAt: null,
         predecessorPlanId: null,
         generationId: null,

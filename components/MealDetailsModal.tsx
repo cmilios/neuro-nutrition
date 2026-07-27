@@ -8,6 +8,7 @@ interface MealDetailsModalProps {
   meal: Meal;
   onToggleIngredient: (ingredient: string) => void;
   mealType: string;
+  isReadOnly?: boolean;
 }
 
 const MealDetailsModal: React.FC<MealDetailsModalProps> = ({ 
@@ -15,7 +16,8 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
   onClose, 
   meal, 
   onToggleIngredient,
-  mealType 
+  mealType,
+  isReadOnly = false,
 }) => {
   // Prevent background scrolling when modal is open
   React.useEffect(() => {
@@ -112,7 +114,9 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
                 return (
                   <div 
                     key={i} 
-                    onClick={() => onToggleIngredient(ing)}
+                    onClick={() => {
+                      if (!isReadOnly) onToggleIngredient(ing);
+                    }}
                     className={`
                       flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all select-none
                       ${isChecked 

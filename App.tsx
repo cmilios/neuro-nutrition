@@ -13,7 +13,16 @@ import { generateMealPlan, regenerateSingleMeal } from './services/aiService';
 import { authService } from './services/authService';
 import { storageService } from './services/storageService';
 import { weeklyPlanGateway } from './services/weeklyPlanGateway';
+import { weeklyPlanCache } from './services/weeklyPlanCache';
+import { requireAuthoritativeWeeklyPlanRow } from './services/weeklyPlanValidation';
 import { supabase } from './services/supabaseClient';
+
+type PlanAuthorityStatus =
+  | 'checking'
+  | 'synchronized'
+  | 'confirmed-empty'
+  | 'stale'
+  | 'unavailable';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -28,6 +37,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [planAuthorityStatus, setPlanAuthorityStatus] =
+    useState<PlanAuthorityStatus>('checking');
   const [rerollingState, setRerollingState] = useState<{ dayIndex: number, mealType: string } | null>(null);
   const [rerollRetry, setRerollRetry] = useState<{
     dayIndex: number;
@@ -70,6 +81,7 @@ const App: React.FC = () => {
     if (outcome.status !== 'succeeded') {
       throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
     }
+    setPlanAuthorityStatus('stale');
   };
 
   const createCurrentWeeklyPlan = async (
@@ -88,6 +100,7 @@ const App: React.FC = () => {
     if (outcome.status !== 'succeeded') {
       throw new Error(outcome.error?.message || 'The Weekly Plan command did not succeed.');
     }
+    setPlanAuthorityStatus('stale');
   };
 
   // Keep auth callbacks synchronous. Calling another Supabase API from an async
@@ -107,6 +120,7 @@ const App: React.FC = () => {
         setMilestones([]);
         setNextWeekRetry(null);
         setRerollRetry(null);
+        setPlanAuthorityStatus('checking');
       }
     };
 
@@ -140,30 +154,52 @@ const App: React.FC = () => {
     if (!user || loadedUserIdRef.current === user.id) return;
 
     let cancelled = false;
+    const cachedPlan = weeklyPlanCache.get(user.id);
     loadedUserIdRef.current = user.id;
     setIsDataLoading(true);
+    setPlanAuthorityStatus('checking');
     setProfile(null);
-    setMealPlan(null);
+    setMealPlan(cachedPlan?.document ?? null);
     setMilestones([]);
 
+    const useCachedPlanFallback = (loadError: unknown) => {
+      console.error('Failed to load Current Weekly Plan:', loadError);
+      if (cancelled) return;
+      setPlanAuthorityStatus(cachedPlan ? 'stale' : 'unavailable');
+      setMealPlan(cachedPlan?.document ?? null);
+    };
+
     storageService.getProfileData(user.id)
-      .then(async (data) => ({
-        data,
-        currentPlan: await weeklyPlanGateway.getCurrent(user.id),
-      }))
-      .then(({ data, currentPlan }) => {
+      .then((data) => {
         if (cancelled || loadedUserIdRef.current !== user.id) return;
         setProfile(data?.profile ?? null);
-        setMealPlan(currentPlan?.document ?? null);
         setMilestones(data?.milestones ?? []);
       })
-      .catch((loadError) => {
-        console.error('Failed to load user data:', loadError);
-        if (!cancelled) {
-          loadedUserIdRef.current = null;
-          setError('Failed to load your data. Please refresh.');
+      .catch((profileError) => {
+        console.error('Failed to load profile data:', profileError);
+        if (!cancelled) setError('Failed to load your data. Please refresh.');
+      });
+
+    weeklyPlanGateway.getCurrent(user.id)
+      .then((currentPlan) => {
+        if (cancelled || loadedUserIdRef.current !== user.id) return;
+        try {
+          if (!currentPlan) {
+            weeklyPlanCache.clear(user.id);
+            setMealPlan(null);
+            setPlanAuthorityStatus('confirmed-empty');
+            return;
+          }
+
+          const validated = requireAuthoritativeWeeklyPlanRow(currentPlan, user.id);
+          weeklyPlanCache.set(user.id, validated);
+          setMealPlan(validated.document);
+          setPlanAuthorityStatus('synchronized');
+        } catch (loadError) {
+          useCachedPlanFallback(loadError);
         }
       })
+      .catch(useCachedPlanFallback)
       .finally(() => {
         if (!cancelled) setIsDataLoading(false);
       });
@@ -187,6 +223,7 @@ const App: React.FC = () => {
       setMilestones([]);
       setNextWeekRetry(null);
       setRerollRetry(null);
+      setPlanAuthorityStatus('checking');
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
       setError('Could not log out. Please try again.');
@@ -194,7 +231,7 @@ const App: React.FC = () => {
   };
 
   const handleProfileSubmit = async (data: UserProfile) => {
-    if (!user) return;
+    if (!user || planAuthorityStatus !== 'confirmed-empty') return;
 
     // Keep the submitted values as a draft so a failed generation can be
     // retried without forcing the user to re-enter the entire profile.
@@ -209,6 +246,7 @@ const App: React.FC = () => {
         await createCurrentWeeklyPlan(user.id, generatedPlan, data);
       } catch (saveError) {
         console.error('Plan generated but failed to save:', saveError);
+        setPlanAuthorityStatus('stale');
         setError('Your plan was generated, but it could not be synced. Please try again before leaving this page.');
       }
     } catch (err) {
@@ -266,7 +304,7 @@ const App: React.FC = () => {
   }
 
   const handleRerollMeal = async (dayIndex: number, mealType: 'breakfast' | 'lunch' | 'dinner' | 'snack') => {
-    if (!user || !profile || !mealPlan) return;
+    if (!user || !profile || !mealPlan || planAuthorityStatus !== 'synchronized') return;
 
     const retryRequest = rerollRetry?.dayIndex === dayIndex && rerollRetry.mealType === mealType
       ? rerollRetry
@@ -311,7 +349,7 @@ const App: React.FC = () => {
   };
 
   const handleToggleIngredient = async (dayIndex: number, mealType: string, ingredient: string) => {
-    if (!user || !profile || !mealPlan) return;
+    if (!user || !profile || !mealPlan || planAuthorityStatus !== 'synchronized') return;
 
     const updatedDays = [...mealPlan.days];
     const targetDay = { ...updatedDays[dayIndex] };
@@ -354,12 +392,10 @@ const App: React.FC = () => {
       if (outcome.status !== 'succeeded') {
         throw new Error(outcome.error?.message || 'Start Over did not succeed.');
       }
-      setProfile(null);
-      setMealPlan(null);
-      setMilestones([]);
       setError(null);
       setNextWeekRetry(null);
       setRerollRetry(null);
+      setPlanAuthorityStatus('stale');
     } catch (clearError) {
       console.error('Failed to reset user data:', clearError);
       setError('Could not reset your data. Please try again.');
@@ -406,6 +442,7 @@ const App: React.FC = () => {
       return;
     }
     if (mealPlan) {
+      if (planAuthorityStatus !== 'synchronized') return;
       setIsReviewModalOpen(true);
     } else {
       handleReset();
@@ -422,13 +459,23 @@ const App: React.FC = () => {
     });
   };
 
-  if (isAuthChecking || isDataLoading) {
+  if (isAuthChecking) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
   }
 
   if (!user) {
     return <AuthScreen onSuccess={handleAuthSuccess} />;
   }
+
+  if (isDataLoading && planAuthorityStatus === 'checking' && !mealPlan) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">
+        Checking your Current Weekly Plan…
+      </div>
+    );
+  }
+
+  const planIsReadOnly = planAuthorityStatus !== 'synchronized';
 
   return (
     <Layout
@@ -439,6 +486,7 @@ const App: React.FC = () => {
       onLogout={handleLogout}
       hasProfile={!!mealPlan}
       canRetryNextWeek={!!nextWeekRetry}
+      planMutationsDisabled={planIsReadOnly}
       currentView={currentView}
       onViewChange={setCurrentView}
     >
@@ -447,6 +495,40 @@ const App: React.FC = () => {
           <h2 className="text-xl font-bold text-slate-800">Welcome back, {user.name}</h2>
         </div>
 
+        {planAuthorityStatus === 'synchronized' && (
+          <span className="sr-only">Current Weekly Plan synchronized</span>
+        )}
+
+        {planAuthorityStatus === 'checking' && mealPlan && (
+          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+            <p className="font-bold">Checking for Current Weekly Plan updates…</p>
+            <p className="text-sm">The cached plan is read-only until the check succeeds.</p>
+          </div>
+        )}
+
+        {planAuthorityStatus === 'stale' && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+            <p className="font-bold">This plan may be out of date.</p>
+            <p className="text-sm">It is read-only until authority can be checked again.</p>
+            <button onClick={() => window.location.reload()} className="mt-2 text-sm font-bold underline">
+              Reload
+            </button>
+          </div>
+        )}
+
+        {planAuthorityStatus === 'unavailable' && (
+          <div className="mx-auto max-w-xl rounded-2xl border border-red-200 bg-red-50 p-8 text-center text-red-900">
+            <h1 className="text-2xl font-bold">Your Current Weekly Plan is unavailable.</h1>
+            <p className="mt-2 text-sm">We could not confirm the authoritative plan, so generation remains disabled.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-lg bg-red-700 px-4 py-2 font-bold text-white"
+            >
+              Reload
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center justify-between">
             <span>{error}</span>
@@ -454,7 +536,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {!mealPlan && !isLoading && (
+        {!mealPlan && !isLoading && planAuthorityStatus === 'confirmed-empty' && (
           <ProfileForm initialData={profile} onSubmit={handleProfileSubmit} isLoading={isLoading} />
         )}
 
@@ -471,6 +553,7 @@ const App: React.FC = () => {
                 rerollingState={rerollingState}
                 rerollRetry={rerollRetry}
                 onToggleIngredient={handleToggleIngredient}
+                isReadOnly={planIsReadOnly}
               />
             ) : currentView === 'performance' ? (
               <PerformanceDashboard
