@@ -4,6 +4,7 @@ import type { GenerationRecord } from "./handler";
 import {
   createInitialGenerationCommandStore,
   createNextWeeklyPlanCommandStore,
+  getWeeklyPlanRolloutState,
   persistUsageRecordToSupabase,
 } from "./persistence";
 
@@ -20,6 +21,27 @@ const record: GenerationRecord = {
   totalTokens: 125,
   outcome: "success",
 };
+
+describe("Weekly Plan rollout persistence", () => {
+  it("reads rollout state with server credentials", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json("authoritative"));
+
+    await expect(getWeeklyPlanRolloutState({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    })).resolves.toBe("authoritative");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/get_weekly_plan_rollout_state",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer server-secret",
+        }),
+      }),
+    );
+  });
+});
 
 describe("AI Usage Record persistence", () => {
   it("retries transient failures with the same idempotency key and body", async () => {

@@ -5,6 +5,7 @@ import type {
   MealRerollCommandStore,
   NextWeeklyPlanCommandOutcome,
   NextWeeklyPlanCommandStore,
+  WeeklyPlanRolloutState,
 } from "./handler.ts";
 
 interface PersistenceOptions {
@@ -18,6 +19,45 @@ interface CommandPersistenceOptions {
   supabaseUrl: string;
   serviceRoleKey: string;
   fetchImpl?: typeof fetch;
+}
+
+async function postgrestRpc<T>(
+  options: CommandPersistenceOptions,
+  functionName: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  const response = await (options.fetchImpl ?? fetch)(
+    `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: options.serviceRoleKey,
+        Authorization: `Bearer ${options.serviceRoleKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Weekly Plan RPC ${functionName} failed with HTTP ${response.status}`,
+    );
+  }
+  return await response.json() as T;
+}
+
+export async function getWeeklyPlanRolloutState(
+  options: CommandPersistenceOptions,
+): Promise<WeeklyPlanRolloutState> {
+  const state = await postgrestRpc<unknown>(
+    options,
+    "get_weekly_plan_rollout_state",
+    {},
+  );
+  if (!["legacy", "maintenance", "authoritative"].includes(state)) {
+    throw new Error("Weekly Plan rollout lookup returned an invalid state");
+  }
+  return state as WeeklyPlanRolloutState;
 }
 
 const defaultDelay = (milliseconds: number) =>
@@ -90,28 +130,11 @@ export async function persistUsageRecordToSupabase(
 export function createInitialGenerationCommandStore(
   options: CommandPersistenceOptions,
 ): InitialGenerationCommandStore {
-  const fetchImpl = options.fetchImpl ?? fetch;
   const rpc = async (
     functionName: string,
     body: Record<string, unknown>,
-  ): Promise<InitialGenerationCommandOutcome> => {
-    const response = await fetchImpl(
-      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: options.serviceRoleKey,
-          Authorization: `Bearer ${options.serviceRoleKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!response.ok) {
-      throw new Error(`Weekly Plan command ${functionName} failed with HTTP ${response.status}`);
-    }
-    return await response.json() as InitialGenerationCommandOutcome;
-  };
+  ): Promise<InitialGenerationCommandOutcome> =>
+    postgrestRpc(options, functionName, body);
 
   return {
     begin(identity) {
@@ -154,28 +177,11 @@ export function createInitialGenerationCommandStore(
 export function createMealRerollCommandStore(
   options: CommandPersistenceOptions,
 ): MealRerollCommandStore {
-  const fetchImpl = options.fetchImpl ?? fetch;
   const rpc = async (
     functionName: string,
     body: Record<string, unknown>,
-  ): Promise<InitialGenerationCommandOutcome> => {
-    const response = await fetchImpl(
-      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: options.serviceRoleKey,
-          Authorization: `Bearer ${options.serviceRoleKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!response.ok) {
-      throw new Error(`Meal Reroll command ${functionName} failed with HTTP ${response.status}`);
-    }
-    return await response.json() as InitialGenerationCommandOutcome;
-  };
+  ): Promise<InitialGenerationCommandOutcome> =>
+    postgrestRpc(options, functionName, body);
 
   return {
     begin(identity) {
@@ -222,30 +228,11 @@ export function createMealRerollCommandStore(
 export function createNextWeeklyPlanCommandStore(
   options: CommandPersistenceOptions,
 ): NextWeeklyPlanCommandStore {
-  const fetchImpl = options.fetchImpl ?? fetch;
   const rpc = async (
     functionName: string,
     body: Record<string, unknown>,
-  ): Promise<NextWeeklyPlanCommandOutcome> => {
-    const response = await fetchImpl(
-      `${options.supabaseUrl}/rest/v1/rpc/${functionName}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: options.serviceRoleKey,
-          Authorization: `Bearer ${options.serviceRoleKey}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!response.ok) {
-      throw new Error(
-        `Next Weekly Plan command ${functionName} failed with HTTP ${response.status}`,
-      );
-    }
-    return await response.json() as NextWeeklyPlanCommandOutcome;
-  };
+  ): Promise<NextWeeklyPlanCommandOutcome> =>
+    postgrestRpc(options, functionName, body);
 
   return {
     begin(identity) {

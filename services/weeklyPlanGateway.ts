@@ -3,42 +3,11 @@ import type {
   IngredientProgressCommand,
   MealPlan,
   MealRerollReservation,
-  Milestone,
-  UserProfile,
   WeeklyPlanCommandOutcome,
 } from "../types";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { legacyWeeklyPlanStorage } from "./storageService";
 import { supabase } from "./supabaseClient";
 import { requireAuthoritativeWeeklyPlanRow } from "./weeklyPlanValidation";
-
-interface LegacyWeeklyPlanSnapshot {
-  plan: MealPlan;
-  updatedAt: string | null;
-}
-
-interface LegacyWeeklyPlanStorage {
-  getWeeklyPlan(userId: string): Promise<LegacyWeeklyPlanSnapshot | null>;
-  createWeeklyPlan(
-    userId: string,
-    profile: UserProfile,
-    plan: MealPlan,
-    milestones: Milestone[],
-  ): Promise<{ updatedAt: string }>;
-  saveWeeklyPlan(userId: string, plan: MealPlan): Promise<{ updatedAt: string }>;
-  clearUserData(userId: string): Promise<void>;
-}
-
-interface CreateCurrentWeeklyPlanCommand extends SaveCurrentWeeklyPlanCommand {
-  profile: UserProfile;
-  milestones: Milestone[];
-}
-
-interface SaveCurrentWeeklyPlanCommand {
-  commandId: string;
-  userId: string;
-  document: MealPlan;
-}
 
 interface StartOverCommand {
   commandId: string;
@@ -49,8 +18,6 @@ interface StartOverCommand {
 
 export interface WeeklyPlanGateway {
   getCurrent(userId: string): Promise<AuthoritativeWeeklyPlanRow | null>;
-  createCurrent(command: CreateCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
-  saveCurrent(command: SaveCurrentWeeklyPlanCommand): Promise<WeeklyPlanCommandOutcome>;
   setIngredientChecked(command: IngredientProgressCommand): Promise<WeeklyPlanCommandOutcome>;
   startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome>;
   getPendingMealRerolls(userId: string): Promise<MealRerollReservation[]>;
@@ -201,24 +168,6 @@ export const createWeeklyPlanInvalidationSubscription = (
   };
 };
 
-const legacyRow = (
-  userId: string,
-  document: MealPlan,
-  updatedAt: string | null,
-): AuthoritativeWeeklyPlanRow => ({
-  planId: `legacy:${userId}`,
-  userId,
-  document,
-  schemaVersion: 1,
-  revision: 0,
-  isActive: true,
-  createdAt: null,
-  updatedAt,
-  deactivatedAt: null,
-  predecessorPlanId: null,
-  generationId: null,
-});
-
 export const createStartOverGateway = (
   client: Pick<SupabaseClient, "rpc">,
 ) => ({
@@ -233,87 +182,12 @@ export const createStartOverGateway = (
   },
 });
 
-const failedOutcome = (
-  commandId: string,
-  error: unknown,
-): WeeklyPlanCommandOutcome => ({
-  commandId,
-  status: "failed",
-  result: null,
-  error: {
-    code: "weekly_plan_persistence_failed",
-    message: error instanceof Error ? error.message : "Weekly Plan persistence failed.",
-    retryable: true,
-  },
-});
-
-export const createWeeklyPlanGateway = (
-  storage: LegacyWeeklyPlanStorage,
-): WeeklyPlanGateway => ({
-  async getCurrent(userId) {
-    const snapshot = await storage.getWeeklyPlan(userId);
-    return snapshot ? legacyRow(userId, snapshot.plan, snapshot.updatedAt) : null;
-  },
-
-  async createCurrent(command) {
-    try {
-      const saved = await storage.createWeeklyPlan(
-        command.userId,
-        command.profile,
-        command.document,
-        command.milestones,
-      );
-      return {
-        commandId: command.commandId,
-        status: "succeeded",
-        result: legacyRow(command.userId, command.document, saved.updatedAt),
-        error: null,
-      };
-    } catch (error) {
-      return failedOutcome(command.commandId, error);
-    }
-  },
-
-  async saveCurrent(command) {
-    try {
-      const saved = await storage.saveWeeklyPlan(command.userId, command.document);
-      return {
-        commandId: command.commandId,
-        status: "succeeded",
-        result: legacyRow(command.userId, command.document, saved.updatedAt),
-        error: null,
-      };
-    } catch (error) {
-      return failedOutcome(command.commandId, error);
-    }
-  },
-
-  async setIngredientChecked(command) {
-    return failedOutcome(
-      command.commandId,
-      new Error("Ingredient progress requires the authoritative store."),
-    );
-  },
-
-  async startOver(command) {
-    return failedOutcome(
-      command.commandId,
-      new Error("Start Over requires the authoritative store."),
-    );
-  },
-  async getPendingMealRerolls() {
-    return [];
-  },
-});
-
-const legacyWeeklyPlanGateway = createWeeklyPlanGateway(legacyWeeklyPlanStorage);
 const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
 const ingredientProgressGateway = createIngredientProgressGateway(supabase);
 const mealRerollReservationReader = createMealRerollReservationReader(supabase);
 const startOverGateway = createStartOverGateway(supabase);
 
 export const weeklyPlanGateway: WeeklyPlanGateway = {
-  ...legacyWeeklyPlanGateway,
   getCurrent: authoritativeWeeklyPlanReader.getCurrent,
   setIngredientChecked: ingredientProgressGateway.setIngredientChecked,
   startOver: startOverGateway.startOver,

@@ -24,6 +24,7 @@ import {
   createInitialGenerationCommandStore,
   createMealRerollCommandStore,
   createNextWeeklyPlanCommandStore,
+  getWeeklyPlanRolloutState,
   persistUsageRecordToSupabase,
 } from "./persistence.ts";
 
@@ -598,6 +599,10 @@ const handler = createGenerateMealPlanHandler({
   authenticate: requireAuthenticatedUser,
   generate,
   persist: persistUsageRecord,
+  getRolloutState: () => getWeeklyPlanRolloutState({
+    supabaseUrl,
+    serviceRoleKey,
+  }),
   initialGeneration: createInitialGenerationCommandStore({
     supabaseUrl,
     serviceRoleKey,

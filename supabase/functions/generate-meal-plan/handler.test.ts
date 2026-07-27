@@ -52,6 +52,36 @@ const partialSuccessor = (likedSlots: number[]) => {
 };
 
 describe("generate-meal-plan HTTP contract", () => {
+  it.each(["legacy", "maintenance"] as const)(
+    "rejects plan mutation while rollout state is %s",
+    async (rolloutState) => {
+      const generate = vi.fn();
+      const handler = createGenerateMealPlanHandler({
+        authenticate: vi.fn().mockResolvedValue({ id: "user-1" }),
+        generate,
+        persist: vi.fn(),
+        getRolloutState: vi.fn().mockResolvedValue(rolloutState),
+      });
+
+      const response = await handler(new Request("http://localhost/generate", {
+        method: "POST",
+        headers: { Authorization: "Bearer test-token", "content-type": "application/json" },
+        body: JSON.stringify({ action: "plan", profile }),
+      }));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: {
+          code: rolloutState === "legacy"
+            ? "weekly_plan_legacy_mode"
+            : "weekly_plan_maintenance",
+          message: expect.any(String),
+        },
+      });
+      expect(generate).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns a generated Weekly Plan through controlled boundaries", async () => {
     const weeklyPlan = { weeklySummary: "Balanced week", days: [] };
     const authenticate = vi.fn().mockResolvedValue({ id: "user-1" });

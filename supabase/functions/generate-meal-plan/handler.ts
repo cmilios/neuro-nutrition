@@ -12,6 +12,11 @@ export interface GenerationUser {
   id: string;
 }
 
+export type WeeklyPlanRolloutState =
+  | "legacy"
+  | "maintenance"
+  | "authoritative";
+
 export interface GenerationRequest {
   action: "plan" | "meal";
   commandId?: string;
@@ -67,6 +72,7 @@ export interface GenerateMealPlanDependencies {
   initialGeneration?: InitialGenerationCommandStore;
   nextGeneration?: NextWeeklyPlanCommandStore;
   mealReroll?: MealRerollCommandStore;
+  getRolloutState?: () => Promise<WeeklyPlanRolloutState>;
 }
 
 export interface WeeklyPlanCommandError {
@@ -456,6 +462,19 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
       } catch (error) {
         if (error instanceof HttpError) throw error;
         throw new HttpError("Request body must be valid JSON.", 400, "invalid_json");
+      }
+
+      const rolloutState = await dependencies.getRolloutState?.() ?? "authoritative";
+      if (rolloutState !== "authoritative") {
+        throw new HttpError(
+          rolloutState === "legacy"
+            ? "Weekly Plan generation is still using legacy storage."
+            : "Weekly Plan changes are temporarily disabled during maintenance.",
+          503,
+          rolloutState === "legacy"
+            ? "weekly_plan_legacy_mode"
+            : "weekly_plan_maintenance",
+        );
       }
 
       const isInitialGeneration =
