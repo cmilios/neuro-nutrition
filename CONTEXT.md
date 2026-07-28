@@ -56,6 +56,14 @@ _Avoid_: Position, time
 The user command that removes the Current Weekly Plan by deactivating it while preserving the user's profile, milestones, AI Usage Records, and inactive plan history. It is distinct from permanent account-data deletion.
 _Avoid_: Reset account, delete account
 
+**Health Profile**:
+The user's biometrics, activity, goals, dietary preferences and restrictions used to tailor Weekly Plans, together with milestones that record progress.
+_Avoid_: User Profile, biometrics
+
+**Health Profile Plan Replacement**:
+A Weekly Plan generated from updated plan-relevant Health Profile data that replaces the Current Weekly Plan only after successful generation and does not apply Meal Review retention rules.
+_Avoid_: Regenerate plan, profile refresh, Next Weekly Plan
+
 **Next Weekly Plan**:
 The variety-focused successor to the current Weekly Plan, evaluated only against that immediately preceding plan. It retains each Liked Meal as an exact recipe copy under the same meal type on a different day and replaces Disliked and Uncooked Meals; after an Empty Meal Review, the planner may retain at most seven Same Meals chosen to preserve nutritional balance and weekly variety, and must change at least twenty-one. Every retained meal keeps its meal type but moves to a different day.
 _Avoid_: Random plan, reset plan
