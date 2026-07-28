@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { Leaf, LogOut, User as UserIcon, CalendarPlus, Settings, PieChart, RotateCcw, Utensils } from 'lucide-react';
+import { Leaf, User as UserIcon, CalendarPlus, Settings, PieChart, Utensils } from 'lucide-react';
 import { User, UserProfile } from '../types';
 
 interface LayoutProps {
@@ -21,8 +21,8 @@ const Layout: React.FC<LayoutProps> = ({
   children, 
   onOpenProfile, 
   onNextWeek, 
-  onStartOver,
-  onLogout, 
+  onStartOver: _onStartOver,
+  onLogout: _onLogout,
   user, 
   userProfile,
   hasProfile,
@@ -104,31 +104,10 @@ const Layout: React.FC<LayoutProps> = ({
                   title="My Profile & Settings"
                  >
                    <Settings size={16} />
-                   <span className="hidden sm:inline">Settings</span>
-                 </button>
-
-                 <button
-                  onClick={onStartOver}
-                  disabled={planMutationsDisabled}
-                  className="text-sm font-medium text-slate-500 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2 transition-colors"
-                  title="Deactivate this Current Weekly Plan"
-                 >
-                   <RotateCcw size={16} />
-                   <span className="hidden sm:inline">Start Over</span>
+                   <span className="hidden sm:inline">Account</span>
                  </button>
                </>
              )}
-             
-             <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-             
-             <button
-               onClick={onLogout}
-               className="text-sm font-medium text-slate-500 hover:text-red-600 flex items-center gap-2 transition-colors"
-               title="Logout"
-             >
-               <LogOut size={16} />
-               <span className="hidden sm:inline">Logout</span>
-             </button>
           </nav>
         </div>
       </header>

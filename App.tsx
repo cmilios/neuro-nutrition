@@ -18,6 +18,10 @@ import {
   Milestone,
   MealType,
   NextWeeklyPlanCommand,
+  Gender,
+  ActivityLevel,
+  Goal,
+  DietType,
 } from './types';
 import {
   generateInitialWeeklyPlan,
@@ -41,7 +45,80 @@ type PlanAuthorityStatus =
   | 'stale'
   | 'unavailable';
 
+const prototypeProfile: UserProfile = {
+  age: 34,
+  gender: Gender.Female,
+  heightCm: 168,
+  weightKg: 67,
+  targetWeightKg: 64,
+  activityLevel: ActivityLevel.ModeratelyActive,
+  goal: Goal.MaintainWeight,
+  dietType: DietType.Mediterranean,
+  allergies: 'None',
+};
+
+const AccountPrototypePreview: React.FC = () => {
+  const [isOpen, setIsOpen] = useState(true);
+
+  return (
+    <Layout
+      user={{ id: 'prototype-user', name: 'Alex Morgan', email: 'alex@example.com' }}
+      userProfile={prototypeProfile}
+      onOpenProfile={() => setIsOpen(true)}
+      onNextWeek={() => undefined}
+      onStartOver={() => undefined}
+      onLogout={() => undefined}
+      hasProfile
+      currentView="plan"
+      onViewChange={() => undefined}
+    >
+      <div className="animate-fade-in">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-emerald-700">Current Weekly Plan</p>
+            <h2 className="mt-1 text-2xl font-bold text-slate-900">Welcome back, Alex</h2>
+          </div>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+            Synchronized
+          </span>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-hidden="true">
+          {['Monday', 'Tuesday', 'Wednesday', 'Thursday'].map((day, index) => (
+            <div key={day} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <span className="font-bold text-slate-800">{day}</span>
+                <span className="text-xs text-slate-400">Day {index + 1}</span>
+              </div>
+              <div className="space-y-3">
+                {[88, 72, 94].map((width, mealIndex) => (
+                  <div key={mealIndex} className="rounded-xl bg-slate-50 p-3">
+                    <div className="h-2 rounded-full bg-slate-200" style={{ width: `${width}%` }} />
+                    <div className="mt-2 h-2 w-1/2 rounded-full bg-emerald-100" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <UserProfileModal
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        profile={prototypeProfile}
+        email="alex@example.com"
+      />
+    </Layout>
+  );
+};
+
 const App: React.FC = () => {
+  if (
+    import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('accountPrototype') === '1'
+  ) {
+    return <AccountPrototypePreview />;
+  }
+
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
@@ -861,10 +938,7 @@ const App: React.FC = () => {
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}
-            milestones={milestones}
-            onUpdateProfile={handleUpdateProfile}
-            onAddMilestone={handleAddMilestone}
-            onDeleteMilestone={handleDeleteMilestone}
+            email={user.email}
           />
         )}
       </div>

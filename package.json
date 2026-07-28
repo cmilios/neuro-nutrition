@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prototype:account": "vite --open \"/neuro-nutrition/?accountPrototype=1&variant=A\"",
     "build": "vite build",
     "preview": "vite preview",
     "release:verify": "node release/cli.mjs verify --manifest release/evidence/release-manifest.json",
