@@ -24,14 +24,30 @@ const GPT_5_6_SOL_PRICING = {
   longContextOutputMultiplier: 1.5,
 } as const;
 
-const PRICING_VERSION = "openai-standard-2026-07-22";
+const GPT_5_6_LUNA_PRICING = {
+  currency: "USD",
+  unitTokens: 1_000_000,
+  inputPerMillionUsd: 1,
+  cachedInputPerMillionUsd: 0.1,
+  cacheWriteInputPerMillionUsd: 1.25,
+  outputPerMillionUsd: 6,
+  longContextThresholdTokens: 272_000,
+  longContextInputMultiplier: 2,
+  longContextOutputMultiplier: 1.5,
+} as const;
+
+const PRICING_VERSION = "openai-standard-2026-07-28";
 const numberOrUndefined = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 
 function pricingFor(model: string) {
-  return model === "gpt-5.6-sol" || model.startsWith("gpt-5.6-sol-") || model === "gpt-5.6"
-    ? GPT_5_6_SOL_PRICING
-    : undefined;
+  if (model === "gpt-5.6-luna" || model.startsWith("gpt-5.6-luna-")) {
+    return GPT_5_6_LUNA_PRICING;
+  }
+  if (model === "gpt-5.6-sol" || model.startsWith("gpt-5.6-sol-") || model === "gpt-5.6") {
+    return GPT_5_6_SOL_PRICING;
+  }
+  return undefined;
 }
 
 function estimateCost(
@@ -39,7 +55,7 @@ function estimateCost(
   cachedInputTokens: number,
   cacheWriteInputTokens: number,
   outputTokens: number,
-  pricing: typeof GPT_5_6_SOL_PRICING,
+  pricing: typeof GPT_5_6_SOL_PRICING | typeof GPT_5_6_LUNA_PRICING,
 ): number {
   const uncachedInputTokens = Math.max(
     0,

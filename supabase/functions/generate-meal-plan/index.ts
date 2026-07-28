@@ -8,7 +8,7 @@
 //
 // Deploy:  supabase functions deploy generate-meal-plan --project-ref <ref>
 // Secrets: supabase secrets set OPENAI_API_KEY=sk-...  --project-ref <ref>
-//          (optional) supabase secrets set OPENAI_MODEL=gpt-5.6-sol
+//          (optional) supabase secrets set OPENAI_MODEL=gpt-5.6-luna
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
@@ -29,9 +29,9 @@ import {
 } from "./persistence.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/responses";
-// The current recommended GPT-5.6 coding/reasoning model is the default. The
-// OPENAI_MODEL secret can override it without a code deployment.
-const DEFAULT_MODEL = "gpt-5.6-sol";
+// Luna is the cost- and latency-optimized GPT-5.6 tier. The OPENAI_MODEL
+// secret can override it without a code deployment.
+const DEFAULT_MODEL = "gpt-5.6-luna";
 
 // ---- JSON schemas (structured outputs) -------------------------------------
 // Every object needs additionalProperties:false and a full `required` list.
