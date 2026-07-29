@@ -33,6 +33,7 @@ import {
 import { weeklyPlanCache } from './services/weeklyPlanCache';
 import { requireAuthoritativeWeeklyPlanRow } from './services/weeklyPlanValidation';
 import { supabase } from './services/supabaseClient';
+import { reportClientIncident } from './services/clientIncidentTelemetry';
 
 type PlanAuthorityStatus =
   | 'checking'
@@ -58,6 +59,8 @@ const App: React.FC = () => {
   const authoritativePlanRef = React.useRef<AuthoritativeWeeklyPlanRow | null>(null);
   const requestPlanRefetchRef = React.useRef<(() => void) | null>(null);
   const reconcilingNextGenerationIdRef = React.useRef<string | null>(null);
+  const recoveringRealtimeRef = React.useRef(false);
+  const realtimeDisconnectedRef = React.useRef(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,12 +104,36 @@ const App: React.FC = () => {
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error && err.message ? err.message : fallback;
 
+  const reportUnknownCommandOutcome = (operation: string) => {
+    void reportClientIncident('unknown_command_outcome', {
+      phase: 'command_transport',
+      operation,
+      authorityStatus: planAuthorityStatus,
+    });
+  };
+
   const applyAuthoritativePlan = (
     row: AuthoritativeWeeklyPlanRow,
     userId: string,
   ) => {
     const validated = requireAuthoritativeWeeklyPlanRow(row, userId);
     const previouslyAuthoritative = authoritativePlanRef.current;
+    if (previouslyAuthoritative && (
+      (
+        validated.planId === previouslyAuthoritative.planId
+        && validated.revision < previouslyAuthoritative.revision
+      )
+      || (
+        validated.planId !== previouslyAuthoritative.planId
+        && validated.predecessorPlanId !== previouslyAuthoritative.planId
+      )
+    )) {
+      void reportClientIncident('revision_mismatch', {
+        phase: 'apply_authoritative_result',
+        operation: 'refetch',
+        authorityStatus: planAuthorityStatus,
+      });
+    }
     authoritativePlanRef.current = validated;
     setAuthoritativePlan(validated);
     weeklyPlanCache.set(userId, validated);
@@ -217,6 +244,11 @@ const App: React.FC = () => {
 
     const useCachedPlanFallback = (loadError: unknown) => {
       console.error('Failed to load Current Weekly Plan:', loadError);
+      void reportClientIncident('authoritative_load_failure', {
+        phase: 'initial_load',
+        operation: 'load',
+        authorityStatus: cachedPlan ? 'stale' : 'unavailable',
+      });
       if (cancelled) return;
       setPlanAuthorityStatus(cachedPlan ? 'stale' : 'unavailable');
       authoritativePlanRef.current = cachedPlan;
@@ -297,11 +329,39 @@ const App: React.FC = () => {
         if (!currentPlan) {
           clearAuthoritativePlan(user.id);
           setPlanAuthorityStatus('confirmed-empty');
+          if (recoveringRealtimeRef.current) {
+            void reportClientIncident('realtime_recovery_succeeded', {
+              phase: 'reconnect_refetch',
+              operation: 'refetch',
+              authorityStatus: 'confirmed-empty',
+            });
+            recoveringRealtimeRef.current = false;
+          }
           return;
         }
         applyAuthoritativePlan(currentPlan, user.id);
+        if (recoveringRealtimeRef.current) {
+          void reportClientIncident('realtime_recovery_succeeded', {
+            phase: 'reconnect_refetch',
+            operation: 'refetch',
+            authorityStatus: 'synchronized',
+          });
+        }
+        recoveringRealtimeRef.current = false;
       } catch (refetchError) {
         console.error('Failed to refetch Current Weekly Plan:', refetchError);
+        void reportClientIncident('authoritative_refetch_failure', {
+          phase: 'realtime_refetch',
+          operation: 'refetch',
+          authorityStatus: authoritativePlanRef.current ? 'stale' : 'unavailable',
+        });
+        if (recoveringRealtimeRef.current) {
+          void reportClientIncident('realtime_recovery_failure', {
+            phase: 'reconnect_refetch',
+            operation: 'refetch',
+            authorityStatus: authoritativePlanRef.current ? 'stale' : 'unavailable',
+          });
+        }
         if (!cancelled) {
           setPlanAuthorityStatus(
             authoritativePlanRef.current ? 'stale' : 'unavailable',
@@ -338,9 +398,13 @@ const App: React.FC = () => {
       scheduleRefetch,
       (status) => {
         if (status === 'connected') {
+          recoveringRealtimeRef.current = realtimeDisconnectedRef.current;
+          realtimeDisconnectedRef.current = false;
           scheduleRefetch();
           return;
         }
+        realtimeDisconnectedRef.current = true;
+        recoveringRealtimeRef.current = false;
         setPlanAuthorityStatus(
           authoritativePlanRef.current ? 'stale' : 'unavailable',
         );
@@ -354,6 +418,29 @@ const App: React.FC = () => {
       subscription.unsubscribe();
     };
   }, [user?.id]);
+
+  const forceReload = () => {
+    const reportFailure = () => {
+      void reportClientIncident('forced_reload_failure', {
+        phase: 'reload',
+        operation: 'reload',
+        authorityStatus: planAuthorityStatus,
+      });
+      setError('Reload could not start. Please use your browser reload control.');
+    };
+    const failureTimer = window.setTimeout(reportFailure, 5_000);
+    window.addEventListener(
+      'beforeunload',
+      () => window.clearTimeout(failureTimer),
+      { once: true },
+    );
+    try {
+      window.location.reload();
+    } catch {
+      window.clearTimeout(failureTimer);
+      reportFailure();
+    }
+  };
 
   const handleAuthSuccess = (authenticatedUser: User) => {
     setUser(authenticatedUser);
@@ -391,6 +478,7 @@ const App: React.FC = () => {
     setProfile(data);
     setIsLoading(true);
     setError(null);
+    let commandOutcomeReceived = false;
 
     try {
       const normalizedProfile = JSON.stringify(data);
@@ -401,6 +489,7 @@ const App: React.FC = () => {
       initialGenerationCommandRef.current = { commandId, normalizedProfile };
 
       const outcome = await generateInitialWeeklyPlan(data, commandId);
+      commandOutcomeReceived = true;
       if (outcome.status === 'in_progress') {
         throw new Error('Your Current Weekly Plan is still being generated. Please try again shortly.');
       }
@@ -422,6 +511,9 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to generate meal plan:', err);
+      if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('generate_initial');
+      }
       setError(errorMessage(err, 'We encountered an issue generating your plan. Please try again.'));
     } finally {
       setIsLoading(false);
@@ -511,6 +603,7 @@ const App: React.FC = () => {
     } catch (err) {
       console.error(err);
       if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('reroll_meal');
         setPendingMealRerolls((current) => current.some((reservation) =>
           reservation.commandId === commandId
         ) ? current : [...current, {
@@ -577,6 +670,7 @@ const App: React.FC = () => {
 
     setPendingIngredientIds((current) => [...current, ingredientId]);
     setError(null);
+    let commandOutcomeReceived = false;
     try {
       const outcome = await weeklyPlanGateway.setIngredientChecked({
         commandId: crypto.randomUUID(),
@@ -588,6 +682,7 @@ const App: React.FC = () => {
         ingredientId,
         checked,
       });
+      commandOutcomeReceived = true;
       if (outcome.status !== 'succeeded' || !outcome.result) {
         if (['stale_plan', 'no_current_plan', 'ingredient_not_found']
           .includes(outcome.error?.code ?? '')) {
@@ -612,6 +707,9 @@ const App: React.FC = () => {
       }
     } catch (saveError) {
       console.error('Failed to save ingredient state:', saveError);
+      if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('set_ingredient_checked');
+      }
       setError('Could not save that ingredient change. Please try again.');
     } finally {
       setPendingIngredientIds((current) =>
@@ -623,6 +721,7 @@ const App: React.FC = () => {
   const handleStartOver = async () => {
     if (!user || !authoritativePlan || planAuthorityStatus !== 'synchronized') return;
     const displayedPlan = authoritativePlan;
+    let commandOutcomeReceived = false;
     setPlanAuthorityStatus('stale');
     try {
       const outcome = await weeklyPlanGateway.startOver({
@@ -631,6 +730,7 @@ const App: React.FC = () => {
         displayedPlanId: displayedPlan.planId,
         displayedRevision: displayedPlan.revision,
       });
+      commandOutcomeReceived = true;
       if (outcome.status !== 'succeeded') {
         throw new Error(outcome.error?.message || 'Start Over did not succeed.');
       }
@@ -643,6 +743,9 @@ const App: React.FC = () => {
       setIsProfileModalOpen(false);
     } catch (clearError) {
       console.error('Failed to Start Over:', clearError);
+      if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('start_over');
+      }
       setError('Could not start over. Please try again.');
     }
   };
@@ -686,6 +789,9 @@ const App: React.FC = () => {
       setNextWeekRetry(null);
     } catch (err) {
       console.error('Failed to generate optimized plan:', err);
+      if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('generate_next');
+      }
       reconcilingNextGenerationIdRef.current =
         commandOutcomeReceived ? null : commandId;
       setNextWeekRetry((current) =>
@@ -791,7 +897,7 @@ const App: React.FC = () => {
           <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
             <p className="font-bold">This plan may be out of date.</p>
             <p className="text-sm">It is read-only until authority can be checked again.</p>
-            <button onClick={() => window.location.reload()} className="mt-2 text-sm font-bold underline">
+            <button onClick={forceReload} className="mt-2 text-sm font-bold underline">
               Reload
             </button>
           </div>
@@ -802,7 +908,7 @@ const App: React.FC = () => {
             <h1 className="text-2xl font-bold">Your Current Weekly Plan is unavailable.</h1>
             <p className="mt-2 text-sm">We could not confirm the authoritative plan, so generation remains disabled.</p>
             <button
-              onClick={() => window.location.reload()}
+              onClick={forceReload}
               className="mt-5 rounded-lg bg-red-700 px-4 py-2 font-bold text-white"
             >
               Reload

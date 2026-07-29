@@ -8,6 +8,35 @@ rollout state of the production project.
 The active production project ref is `cmayisxvronrwvzhyuer`. It must never be
 used as the rehearsal project ref.
 
+## Post-release observation and delivery gate
+
+Issue #25 adds a separate, read-only delivery gate. Migration
+`20260729120000_create_weekly_plan_observation.sql` creates the
+`weekly_plan_monitor` NOLOGIN role and grants it only execution of an aggregate
+snapshot function. Provision the workflow token with that role; never use the
+service-role key for observation.
+
+The scheduled workflow runs every fifteen minutes. Its three GET-only probes
+return the aggregate database snapshot, immutable release comparison, and
+critical function-failure count. Missing or failed probes fail closed, emit a
+GitHub Actions operator alert, and optionally notify `OBSERVATION_ALERT_URL`.
+The runner has no plan-mutation path. Client telemetry is allow-listed,
+content-free, best-effort, and cannot interrupt application behavior. Configure
+the required `VITE_CLIENT_INCIDENT_ALERT_URL` deployment secret to route a
+telemetry-storage outage to an independent, abuse-protected operator alert
+endpoint. Configure `CLIENT_INCIDENT_ALERT_HEALTH_URL` as its read-only health
+check; deployment fails if either is missing or the endpoint is unreachable.
+
+After at least 24 hours, assemble every timestamped monitor artifact into the
+input and create the immutable final report with `npm.cmd run
+observation:report`. It derives cadence from those timestamps and says
+`delivered` only when every observation is clean, no gap exceeds fifteen
+minutes, alert reachability is evidenced, the identified recovery point has
+direct retention proof through at least seven days after the window, all
+required evidence links are present, and every finding has a resolved
+disposition. A summary comment or declared timestamp cannot satisfy these
+gates.
+
 ## 1. Prepare and pin one candidate
 
 Start from a clean commit. Record the full Edge Function deployment version

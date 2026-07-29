@@ -63,6 +63,7 @@ export interface GenerationResult {
 export interface GenerationRecord extends ProviderUsageRecord {
   userId: string;
   action: GenerationRequest["action"];
+  commandId?: string;
 }
 
 export interface GenerateMealPlanDependencies {
@@ -413,6 +414,7 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
   ) => dependencies.persist({
     userId: user.id,
     action: request.action,
+    commandId: request.commandId,
     ...usageRecord,
   });
   const persistAndReport = async (

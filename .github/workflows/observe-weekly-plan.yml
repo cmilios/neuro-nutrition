@@ -1,0 +1,36 @@
+name: Observe authoritative Weekly Plan
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run least-privilege read-only observation
+        run: node release/observationMonitor.mjs
+        env:
+          OBSERVATION_DATABASE_URL: ${{ secrets.OBSERVATION_DATABASE_URL }}
+          OBSERVATION_DATABASE_TOKEN: ${{ secrets.OBSERVATION_DATABASE_TOKEN }}
+          OBSERVATION_RELEASE_IDENTITY_URL: ${{ secrets.OBSERVATION_RELEASE_IDENTITY_URL }}
+          OBSERVATION_RELEASE_IDENTITY_TOKEN: ${{ secrets.OBSERVATION_RELEASE_IDENTITY_TOKEN }}
+          OBSERVATION_FUNCTION_FAILURES_URL: ${{ secrets.OBSERVATION_FUNCTION_FAILURES_URL }}
+          OBSERVATION_FUNCTION_FAILURES_TOKEN: ${{ secrets.OBSERVATION_FUNCTION_FAILURES_TOKEN }}
+          OBSERVATION_ALERT_URL: ${{ secrets.OBSERVATION_ALERT_URL }}
+      - name: Retain privacy-limited result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-plan-observation-${{ github.run_id }}
+          path: observation-result.json
+          retention-days: 14

@@ -1,0 +1,54 @@
+{
+  "observationStartedAt": "2026-07-28T09:12:21.000Z",
+  "observationEndedAt": "2026-07-29T10:51:37.000Z",
+  "recoveryPointRetainedUntil": "2026-08-05T10:51:37.000Z",
+  "monitoringCoverage": {
+    "startedAt": "2026-07-28T09:12:21.000Z",
+    "endedAt": "2026-07-29T10:51:37.000Z",
+    "cadenceMinutes": 15,
+    "maximumGapMinutes": 15,
+    "evidence": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5116755338"
+  },
+  "operatorAlerting": {
+    "configured": false,
+    "reachable": false,
+    "evidence": null
+  },
+  "recoveryPoint": {
+    "id": "verified-pre-cutover-production-recovery-point",
+    "verified": false,
+    "evidence": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5096545493"
+  },
+  "snapshots": [
+    {
+      "checkedAt": "2026-07-29T10:51:37.000Z",
+      "rolloutState": "authoritative",
+      "releaseIdentity": { "matches": true },
+      "planInvariants": { "violations": 0 },
+      "commands": { "stale": 0, "invalidStatus": 0 },
+      "locks": { "stale": 0 },
+      "reservations": { "stale": 0 },
+      "aiUsageLinkage": { "unlinked": 0 },
+      "migrationEvidence": { "valid": true },
+      "functionFailures": { "critical": 0 },
+      "clientIncidents": { "critical": 0 }
+    }
+  ],
+  "evidence": {
+    "immutableRelease": "https://github.com/cmilios/neuro-nutrition/commit/98530f3",
+    "migrationAssertions": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5096545493",
+    "signedInSuite": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5101231083",
+    "activeSoak": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5101775248",
+    "monitoringResults": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5116755338",
+    "recoveryPoint": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5096545493"
+  },
+  "findings": [
+    {
+      "id": "function-release-identity-drift",
+      "severity": "critical",
+      "status": "resolved",
+      "disposition": "Production entered maintenance, the intentional committed release was verified and pinned as function version 16, and a fresh observation window completed cleanly.",
+      "evidence": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5102193879"
+    }
+  ]
+}

@@ -31,12 +31,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify independent telemetry alerting
+        run: |
+          test -n "$VITE_CLIENT_INCIDENT_ALERT_URL"
+          test -n "$CLIENT_INCIDENT_ALERT_HEALTH_URL"
+          curl --fail --silent --show-error "$CLIENT_INCIDENT_ALERT_HEALTH_URL"
+        env:
+          VITE_CLIENT_INCIDENT_ALERT_URL: ${{ secrets.VITE_CLIENT_INCIDENT_ALERT_URL }}
+          CLIENT_INCIDENT_ALERT_HEALTH_URL: ${{ secrets.CLIENT_INCIDENT_ALERT_HEALTH_URL }}
+
       - name: Build
         run: npm run build
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_CLIENT_INCIDENT_ALERT_URL: ${{ secrets.VITE_CLIENT_INCIDENT_ALERT_URL }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

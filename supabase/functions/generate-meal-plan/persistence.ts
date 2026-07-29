@@ -71,6 +71,7 @@ export async function persistUsageRecordToSupabase(
   const delay = options.delay ?? defaultDelay;
   const body = JSON.stringify({
     call_id: record.callId,
+    command_id: record.commandId,
     user_id: record.userId,
     action: record.action,
     attempt: record.attempt,

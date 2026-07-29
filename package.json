@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "release:verify": "node release/cli.mjs verify --manifest release/evidence/release-manifest.json",
+    "observation:check": "node release/observationMonitor.mjs",
+    "observation:report": "node release/observationCli.mjs --input release/evidence/delivery-gate-input.json --out release/evidence/delivery-gate-report.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
