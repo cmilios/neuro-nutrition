@@ -6,6 +6,7 @@ import {
   WeeklyPlanCommandOutcome,
   MealRerollCommand,
   NextWeeklyPlanCommand,
+  HealthProfilePlanReplacementCommand,
 } from "../types";
 import { supabase } from "./supabaseClient";
 
@@ -117,6 +118,20 @@ export const generateNextWeeklyPlan = (
     feedback: command.feedback,
     currentPlan: command.currentPlan,
     reviewType: command.reviewType,
+  });
+
+export const replaceWeeklyPlanFromProfile = (
+  profile: UserProfile,
+  command: HealthProfilePlanReplacementCommand,
+): Promise<WeeklyPlanCommandOutcome> =>
+  invokeCommand({
+    action: "plan",
+    operation: "health_profile_plan_replacement",
+    commandId: command.commandId,
+    resumeExisting: command.resumeExisting,
+    profile,
+    displayedPlanId: command.displayedPlanId,
+    displayedRevision: command.displayedRevision,
   });
 
 export const regenerateSingleMeal = async (

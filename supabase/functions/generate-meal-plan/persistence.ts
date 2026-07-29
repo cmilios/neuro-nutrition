@@ -274,3 +274,58 @@ export function createNextWeeklyPlanCommandStore(
     },
   };
 }
+
+export function createHealthProfilePlanReplacementCommandStore(
+  options: CommandPersistenceOptions,
+): NextWeeklyPlanCommandStore {
+  const rpc = async (
+    functionName: string,
+    body: Record<string, unknown>,
+  ): Promise<NextWeeklyPlanCommandOutcome> =>
+    postgrestRpc(options, functionName, body);
+
+  return {
+    begin(identity) {
+      return rpc("begin_health_profile_plan_replacement", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+        p_input_fingerprint: identity.inputFingerprint,
+        p_source_plan_id: identity.sourcePlanId,
+        p_source_revision: identity.sourceRevision,
+      });
+    },
+    checkpoint(command) {
+      return rpc("checkpoint_health_profile_plan_replacement", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_checkpoint: command.checkpoint,
+      });
+    },
+    complete(command) {
+      return rpc("complete_health_profile_plan_replacement", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_document: command.document,
+      });
+    },
+    fail(command) {
+      return rpc("fail_health_profile_plan_replacement", {
+        p_user_id: command.userId,
+        p_command_id: command.commandId,
+        p_input_fingerprint: command.inputFingerprint,
+        p_error_code: command.errorCode,
+        p_error_message: command.errorMessage,
+        p_retryable: command.retryable,
+        p_failure_evidence: command.evidence,
+      });
+    },
+    recover(identity) {
+      return rpc("recover_stale_health_profile_plan_replacement", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+      });
+    },
+  };
+}

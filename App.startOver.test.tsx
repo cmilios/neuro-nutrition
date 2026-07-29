@@ -58,10 +58,10 @@ vi.mock("./services/authService", () => ({
 }));
 
 vi.mock("./components/Layout", () => ({
-  default: ({ children, onStartOver, userProfile }) => (
+  default: ({ children, onOpenProfile, userProfile }) => (
     <div>
       <div>{userProfile ? `profile-${userProfile.age}` : "profile-empty"}</div>
-      <button onClick={onStartOver}>Exercise Start Over</button>
+      <button onClick={onOpenProfile}>Open Account</button>
       {children}
     </div>
   ),
@@ -126,7 +126,10 @@ describe("application Start Over flow", () => {
 
     expect(await screen.findByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
     expect(screen.getByText("plan-editable")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Exercise Start Over" }));
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("tab", { name: "Start Over" }));
+    await user.click(screen.getByRole("button", { name: "Start Over" }));
+    await user.click(screen.getAllByRole("button", { name: "Start Over" }).at(-1)!);
 
     expect(await screen.findByText("plan-read-only")).toBeInTheDocument();
     expect(screen.getByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
@@ -163,11 +166,14 @@ describe("application Start Over flow", () => {
     render(<App />);
 
     expect(await screen.findByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Exercise Start Over" }));
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("tab", { name: "Start Over" }));
+    await user.click(screen.getByRole("button", { name: "Start Over" }));
+    await user.click(screen.getAllByRole("button", { name: "Start Over" }).at(-1)!);
 
-    expect(await screen.findByText("Could not start over. Please try again."))
-      .toBeInTheDocument();
+    expect((await screen.findAllByText("Could not start over. Please try again.")).length)
+      .toBeGreaterThan(0);
     expect(screen.getByText(weeklyPlanFixture.weeklySummary)).toBeInTheDocument();
-    expect(screen.getByText("plan-read-only")).toBeInTheDocument();
+    expect(screen.getByText("plan-editable")).toBeInTheDocument();
   });
 });

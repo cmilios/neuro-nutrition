@@ -1,5 +1,17 @@
 project_id = "cmayisxvronrwvzhyuer"
 
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = [
+  "http://localhost:3000/recover-password",
+  "http://127.0.0.1:3000/recover-password",
+]
+minimum_password_length = 8
+password_requirements = "letters_digits"
+
+[auth.email]
+secure_password_change = true
+
 [functions.generate-meal-plan]
 # Keep JWT verification ON so only authenticated users can call the AI proxy.
 verify_jwt = true

@@ -91,6 +91,8 @@ export interface AuthoritativeWeeklyPlanRow {
   generationId: string | null;
   nextGenerationId?: string | null;
   nextGenerationLockedAt?: string | null;
+  healthProfileReplacementId?: string | null;
+  healthProfileReplacementLockedAt?: string | null;
 }
 
 export type WeeklyPlanCommandStatus = 'succeeded' | 'in_progress' | 'failed';
@@ -136,6 +138,13 @@ export interface NextWeeklyPlanCommand {
   feedback: MealFeedback[];
   currentPlan: MealPlan;
   reviewType: 'empty' | 'partial';
+}
+
+export interface HealthProfilePlanReplacementCommand {
+  commandId: string;
+  displayedPlanId: string;
+  displayedRevision: number;
+  resumeExisting?: boolean;
 }
 
 export interface MealRerollReservation {

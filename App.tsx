@@ -8,6 +8,7 @@ import LoadingView from './components/LoadingView';
 import AuthScreen from './components/AuthScreen';
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
+import PasswordRecoveryScreen from './components/PasswordRecoveryScreen';
 import {
   AuthoritativeWeeklyPlanRow,
   UserProfile,
@@ -22,6 +23,7 @@ import {
 import {
   generateInitialWeeklyPlan,
   generateNextWeeklyPlan,
+  replaceWeeklyPlanFromProfile,
   rerollMeal,
 } from './services/aiService';
 import { authService } from './services/authService';
@@ -59,6 +61,15 @@ const App: React.FC = () => {
   const authoritativePlanRef = React.useRef<AuthoritativeWeeklyPlanRow | null>(null);
   const requestPlanRefetchRef = React.useRef<(() => void) | null>(null);
   const reconcilingNextGenerationIdRef = React.useRef<string | null>(null);
+  const profileReplacementCommandRef = React.useRef<{
+    commandId: string;
+    normalizedProfile: string;
+  } | null>(null);
+  const startOverCommandRef = React.useRef<{
+    commandId: string;
+    planId: string;
+    revision: number;
+  } | null>(null);
   const recoveringRealtimeRef = React.useRef(false);
   const realtimeDisconnectedRef = React.useRef(false);
 
@@ -197,6 +208,8 @@ const App: React.FC = () => {
         setPendingMealRerolls([]);
         setPendingIngredientIds([]);
         initialGenerationCommandRef.current = null;
+        profileReplacementCommandRef.current = null;
+        startOverCommandRef.current = null;
         reconcilingNextGenerationIdRef.current = null;
         setPlanAuthorityStatus('checking');
       }
@@ -462,11 +475,13 @@ const App: React.FC = () => {
       setPendingMealRerolls([]);
       setPendingIngredientIds([]);
       initialGenerationCommandRef.current = null;
+      profileReplacementCommandRef.current = null;
+      startOverCommandRef.current = null;
       reconcilingNextGenerationIdRef.current = null;
       setPlanAuthorityStatus('checking');
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
-      setError('Could not log out. Please try again.');
+      throw new Error('Could not log out. Please try again.');
     }
   };
 
@@ -520,16 +535,129 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateProfile = async (updatedProfile: UserProfile) => {
-    if (!user || !mealPlan) return;
+  const handleUpdateProfile = async (
+    updatedProfile: UserProfile,
+    replacePlan: boolean,
+  ) => {
+    if (!user) throw new Error('Your session is no longer available.');
+    await storageService.saveProfileData(user.id, updatedProfile, milestones);
+    setProfile(updatedProfile);
+    if (!replacePlan) return;
+
+    const sourcePlan = authoritativePlanRef.current;
+    if (!sourcePlan || planAuthorityStatus !== 'synchronized') {
+      throw new Error('Your Health Profile was saved, but the Current Weekly Plan is not ready to be replaced.');
+    }
+
+    const normalizedProfile = JSON.stringify(updatedProfile);
+    const pending = profileReplacementCommandRef.current;
+    const commandId = pending?.normalizedProfile === normalizedProfile
+      ? pending.commandId
+      : crypto.randomUUID();
+    profileReplacementCommandRef.current = { commandId, normalizedProfile };
+    let commandOutcomeReceived = false;
+    setPlanAuthorityStatus('stale');
     try {
-      await storageService.saveProfileData(user.id, updatedProfile, milestones);
-      setProfile(updatedProfile);
-    } catch (saveError) {
-      console.error('Failed to update profile:', saveError);
-      setError('Could not save your profile changes. Please try again.');
+      const outcome = await replaceWeeklyPlanFromProfile(updatedProfile, {
+        commandId,
+        displayedPlanId: sourcePlan.planId,
+        displayedRevision: sourcePlan.revision,
+      });
+      commandOutcomeReceived = true;
+      if (outcome.status === 'in_progress') {
+        throw new Error('Weekly Plan replacement is still in progress.');
+      }
+      if (outcome.status === 'failed') {
+        profileReplacementCommandRef.current = null;
+        throw Object.assign(
+          new Error(
+            outcome.error?.message
+              || 'Weekly Plan replacement failed. Your previous plan is unchanged.',
+          ),
+          { retryable: outcome.error?.retryable ?? false },
+        );
+      }
+      if (!outcome.result) {
+        throw new Error('Weekly Plan replacement returned no authoritative plan.');
+      }
+      profileReplacementCommandRef.current = null;
+      applyAuthoritativePlan(outcome.result, user.id);
+      setIsProfileModalOpen(false);
+    } catch (replacementError) {
+      if (!commandOutcomeReceived) {
+        reportUnknownCommandOutcome('health_profile_plan_replacement');
+      } else {
+        setPlanAuthorityStatus('synchronized');
+      }
+      throw replacementError;
     }
   };
+
+  useEffect(() => {
+    const lockedCommandId = authoritativePlan?.healthProfileReplacementId;
+    if (!user || !profile || !authoritativePlan || !lockedCommandId) return;
+
+    let cancelled = false;
+    let replayTimer: ReturnType<typeof setTimeout> | null = null;
+    const sourcePlan = authoritativePlan;
+
+    const replay = async (commandId: string, mayRetryRecoveredStale = true) => {
+      try {
+        const outcome = await replaceWeeklyPlanFromProfile(profile, {
+          commandId,
+          displayedPlanId: sourcePlan.planId,
+          displayedRevision: sourcePlan.revision,
+          resumeExisting: commandId === lockedCommandId,
+        });
+        if (cancelled) return;
+        if (outcome.status === 'succeeded' && outcome.result) {
+          profileReplacementCommandRef.current = null;
+          applyAuthoritativePlan(outcome.result, user.id);
+          return;
+        }
+        if (outcome.status === 'in_progress') {
+          replayTimer = setTimeout(() => void replay(commandId), 60_000);
+          return;
+        }
+        if (
+          outcome.status === 'failed'
+          && outcome.error?.code === 'stale_generation_recovered'
+          && mayRetryRecoveredStale
+        ) {
+          const retryCommandId = crypto.randomUUID();
+          profileReplacementCommandRef.current = {
+            commandId: retryCommandId,
+            normalizedProfile: JSON.stringify(profile),
+          };
+          await replay(retryCommandId, false);
+          return;
+        }
+
+        profileReplacementCommandRef.current = null;
+        requestPlanRefetchRef.current?.();
+        setError(
+          outcome.error?.message
+            ?? 'Weekly Plan replacement failed. Your previous plan is unchanged.',
+        );
+      } catch (replayError) {
+        if (cancelled) return;
+        reportUnknownCommandOutcome('health_profile_plan_replacement');
+        replayTimer = setTimeout(() => void replay(commandId), 60_000);
+      }
+    };
+
+    void replay(lockedCommandId);
+    return () => {
+      cancelled = true;
+      if (replayTimer) clearTimeout(replayTimer);
+    };
+  }, [
+    authoritativePlan?.healthProfileReplacementId,
+    authoritativePlan?.planId,
+    authoritativePlan?.revision,
+    profile,
+    user?.id,
+  ]);
 
   const handleAddMilestone = async (weight: number, note: string, bodyFat?: number) => {
     if (!user || !profile || !mealPlan) return;
@@ -719,21 +847,37 @@ const App: React.FC = () => {
   };
 
   const handleStartOver = async () => {
-    if (!user || !authoritativePlan || planAuthorityStatus !== 'synchronized') return;
+    if (!user || !authoritativePlan || planAuthorityStatus !== 'synchronized') {
+      throw new Error('Start Over is unavailable until the Current Weekly Plan is synchronized.');
+    }
     const displayedPlan = authoritativePlan;
     let commandOutcomeReceived = false;
+    const pendingCommand = startOverCommandRef.current;
+    const commandId = pendingCommand?.planId === displayedPlan.planId
+      && pendingCommand.revision === displayedPlan.revision
+      ? pendingCommand.commandId
+      : crypto.randomUUID();
+    startOverCommandRef.current = {
+      commandId,
+      planId: displayedPlan.planId,
+      revision: displayedPlan.revision,
+    };
     setPlanAuthorityStatus('stale');
     try {
       const outcome = await weeklyPlanGateway.startOver({
-        commandId: crypto.randomUUID(),
+        commandId,
         userId: user.id,
         displayedPlanId: displayedPlan.planId,
         displayedRevision: displayedPlan.revision,
       });
       commandOutcomeReceived = true;
       if (outcome.status !== 'succeeded') {
+        if (outcome.status === 'failed') {
+          startOverCommandRef.current = null;
+        }
         throw new Error(outcome.error?.message || 'Start Over did not succeed.');
       }
+      startOverCommandRef.current = null;
       setError(null);
       setNextWeekRetry(null);
       setRerollRetry(null);
@@ -745,8 +889,12 @@ const App: React.FC = () => {
       console.error('Failed to Start Over:', clearError);
       if (!commandOutcomeReceived) {
         reportUnknownCommandOutcome('start_over');
+        requestPlanRefetchRef.current?.();
+      } else {
+        setPlanAuthorityStatus('synchronized');
       }
       setError('Could not start over. Please try again.');
+      throw new Error('Could not start over. Please try again.');
     }
   };
 
@@ -835,6 +983,14 @@ const App: React.FC = () => {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
   }
 
+  if (window.location.pathname === '/recover-password') {
+    return (
+      <PasswordRecoveryScreen
+        onComplete={authService.completePasswordRecovery}
+      />
+    );
+  }
+
   if (!user) {
     return <AuthScreen onSuccess={handleAuthSuccess} />;
   }
@@ -849,8 +1005,12 @@ const App: React.FC = () => {
 
   const nextGenerationLocked =
     !!pendingNextGenerationId || !!authoritativePlan?.nextGenerationId;
+  const profileReplacementLocked =
+    !!authoritativePlan?.healthProfileReplacementId;
   const planIsReadOnly =
-    planAuthorityStatus !== 'synchronized' || nextGenerationLocked;
+    planAuthorityStatus !== 'synchronized'
+    || nextGenerationLocked
+    || profileReplacementLocked;
   const planLifecycleBlocked =
     planIsReadOnly || !!rerollingState || pendingMealRerolls.length > 0;
 
@@ -860,8 +1020,6 @@ const App: React.FC = () => {
       userProfile={profile}
       onOpenProfile={() => setIsProfileModalOpen(true)}
       onNextWeek={handleNextWeekRequest}
-      onStartOver={() => void handleStartOver()}
-      onLogout={handleLogout}
       hasProfile={!!mealPlan}
       canRetryNextWeek={!!nextWeekRetry}
       planMutationsDisabled={planLifecycleBlocked && !nextWeekRetry}
@@ -962,16 +1120,34 @@ const App: React.FC = () => {
           />
         )}
 
-        {profile && mealPlan && (
+        {isProfileModalOpen && (
           <UserProfileModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}
             milestones={milestones}
+            email={user.email}
+            name={user.name}
+            hasCurrentPlan={!!authoritativePlan}
+            planMutationsDisabled={planLifecycleBlocked}
             onUpdateProfile={handleUpdateProfile}
             onAddMilestone={handleAddMilestone}
             onDeleteMilestone={handleDeleteMilestone}
+            onChangePassword={authService.changePassword}
+            onSendRecovery={() => authService.sendPasswordRecovery(
+              user.email,
+              `${window.location.origin}/recover-password`,
+            )}
+            onStartOver={handleStartOver}
+            onLogout={handleLogout}
           />
+        )}
+
+        {profileReplacementLocked && mealPlan && (
+          <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+            <p className="font-bold">Your Weekly Plan is being tailored to your updated Health Profile.</p>
+            <p className="text-sm">Your Current Weekly Plan remains available until its replacement succeeds.</p>
+          </div>
         )}
       </div>
     </Layout>

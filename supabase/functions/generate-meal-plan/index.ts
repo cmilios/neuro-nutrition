@@ -21,6 +21,7 @@ import {
 } from "./handler.ts";
 import { createOpenAIUsageRecord } from "./usage.ts";
 import {
+  createHealthProfilePlanReplacementCommandStore,
   createInitialGenerationCommandStore,
   createMealRerollCommandStore,
   createNextWeeklyPlanCommandStore,
@@ -589,6 +590,28 @@ async function persistUsageRecord(record: GenerationRecord): Promise<void> {
   await persistUsageRecordToSupabase(record, { supabaseUrl, serviceRoleKey });
 }
 
+async function loadSavedHealthProfile(
+  userId: string,
+): Promise<Record<string, unknown> | null> {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/user_data?select=profile&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    {
+      headers: {
+        apikey: serviceRoleKey,
+        Authorization: `Bearer ${serviceRoleKey}`,
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Saved Health Profile lookup failed with HTTP ${response.status}`);
+  }
+  const rows = await response.json() as Array<{ profile?: unknown }>;
+  const profile = rows[0]?.profile;
+  return profile && typeof profile === "object" && !Array.isArray(profile)
+    ? profile as Record<string, unknown>
+    : null;
+}
+
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 if (!supabaseUrl || !serviceRoleKey) {
@@ -599,6 +622,7 @@ const handler = createGenerateMealPlanHandler({
   authenticate: requireAuthenticatedUser,
   generate,
   persist: persistUsageRecord,
+  loadHealthProfile: loadSavedHealthProfile,
   getRolloutState: () => getWeeklyPlanRolloutState({
     supabaseUrl,
     serviceRoleKey,
@@ -608,6 +632,10 @@ const handler = createGenerateMealPlanHandler({
     serviceRoleKey,
   }),
   nextGeneration: createNextWeeklyPlanCommandStore({
+    supabaseUrl,
+    serviceRoleKey,
+  }),
+  profileReplacement: createHealthProfilePlanReplacementCommandStore({
     supabaseUrl,
     serviceRoleKey,
   }),

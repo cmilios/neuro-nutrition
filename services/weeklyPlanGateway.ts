@@ -37,6 +37,8 @@ interface WeeklyPlanDatabaseRow {
   generation_id: string | null;
   next_generation_id: string | null;
   next_generation_locked_at: string | null;
+  health_profile_replacement_id: string | null;
+  health_profile_replacement_locked_at: string | null;
 }
 
 const authoritativeRow = (row: WeeklyPlanDatabaseRow): AuthoritativeWeeklyPlanRow => ({
@@ -53,6 +55,8 @@ const authoritativeRow = (row: WeeklyPlanDatabaseRow): AuthoritativeWeeklyPlanRo
   generationId: row.generation_id,
   nextGenerationId: row.next_generation_id,
   nextGenerationLockedAt: row.next_generation_locked_at,
+  healthProfileReplacementId: row.health_profile_replacement_id,
+  healthProfileReplacementLockedAt: row.health_profile_replacement_locked_at,
 });
 
 export const createAuthoritativeWeeklyPlanReader = (
@@ -64,7 +68,8 @@ export const createAuthoritativeWeeklyPlanReader = (
       .select(`
         plan_id, user_id, document, schema_version, revision, is_active,
         created_at, updated_at, deactivated_at, predecessor_plan_id, generation_id,
-        next_generation_id, next_generation_locked_at
+        next_generation_id, next_generation_locked_at,
+        health_profile_replacement_id, health_profile_replacement_locked_at
       `)
       .eq("user_id", userId)
       .eq("is_active", true)

@@ -64,6 +64,30 @@ export const authService = {
     if (error) throw error;
   },
 
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+      current_password: currentPassword,
+    });
+    if (error) throw error;
+    return data.user;
+  },
+
+  sendPasswordRecovery: async (email: string, redirectTo: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    if (error) throw error;
+  },
+
+  completePasswordRecovery: async (newPassword: string) => {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+    return data.user;
+  },
+
   // This is kept for compatibility but synchronous checks are less reliable with async auth.
   // We will primarily use the onAuthStateChange listener in App.tsx.
   getCurrentUser: (): User | null => {

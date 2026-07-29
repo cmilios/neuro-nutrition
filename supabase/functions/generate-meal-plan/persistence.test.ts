@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GenerationRecord } from "./handler";
 import {
+  createHealthProfilePlanReplacementCommandStore,
   createInitialGenerationCommandStore,
   createNextWeeklyPlanCommandStore,
   getWeeklyPlanRolloutState,
@@ -265,6 +266,40 @@ describe("Next Weekly Plan command persistence", () => {
           p_input_fingerprint: "a".repeat(64),
           p_source_plan_id: "20000000-0000-4000-8000-000000000001",
           p_source_revision: 3,
+        }),
+      }),
+    );
+  });
+});
+
+describe("Health Profile Plan Replacement persistence", () => {
+  it("routes stale recovery through the dedicated service-only RPC", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "in_progress",
+      result: null,
+      error: null,
+      shouldGenerate: false,
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createHealthProfilePlanReplacementCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.recover!({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/recover_stale_health_profile_plan_replacement",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: "00000000-0000-4000-8000-000000000001",
+          p_command_id: outcome.commandId,
         }),
       }),
     );
