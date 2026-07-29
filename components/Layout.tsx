@@ -1,13 +1,11 @@
 import React, { ReactNode } from 'react';
-import { Leaf, LogOut, User as UserIcon, CalendarPlus, Settings, PieChart, RotateCcw, Utensils } from 'lucide-react';
+import { Leaf, User as UserIcon, CalendarPlus, ChevronDown, PieChart, Utensils } from 'lucide-react';
 import { User, UserProfile } from '../types';
 
 interface LayoutProps {
   children: ReactNode;
   onOpenProfile: () => void;
   onNextWeek: () => void;
-  onStartOver: () => void;
-  onLogout: () => void;
   user: User | null;
   userProfile: UserProfile | null;
   hasProfile: boolean;
@@ -21,8 +19,6 @@ const Layout: React.FC<LayoutProps> = ({
   children, 
   onOpenProfile, 
   onNextWeek, 
-  onStartOver,
-  onLogout, 
   user, 
   userProfile,
   hasProfile,
@@ -74,14 +70,24 @@ const Layout: React.FC<LayoutProps> = ({
              )}
 
              {user && (
-               <div className="hidden lg:flex items-center gap-2 text-sm text-slate-600 bg-slate-100 px-3 py-1.5 rounded-full border border-slate-200">
+               <button
+                 type="button"
+                 onClick={onOpenProfile}
+                 aria-label="Open Account"
+                 aria-haspopup="dialog"
+                 title="Account"
+                 className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 p-1.5 text-sm text-slate-700 transition hover:bg-slate-200 sm:px-3"
+               >
                   {userProfile?.photo ? (
-                    <img src={userProfile.photo} alt={user.name} className="w-5 h-5 rounded-full object-cover" />
+                    <img src={userProfile.photo} alt="" className="h-6 w-6 rounded-full object-cover" />
                   ) : (
-                    <UserIcon size={14} className="text-slate-400" />
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white">
+                      <UserIcon size={15} className="text-slate-500" />
+                    </span>
                   )}
-                  <span className="font-medium">{user.name}</span>
-               </div>
+                  <span className="hidden font-semibold sm:inline">{user.name || user.email}</span>
+                  <ChevronDown size={14} className="hidden text-slate-400 sm:block" />
+               </button>
              )}
 
              {hasProfile && (
@@ -98,37 +104,8 @@ const Layout: React.FC<LayoutProps> = ({
                    </span>
                  </button>
 
-                 <button 
-                  onClick={onOpenProfile}
-                  className="text-sm font-medium text-slate-500 hover:text-slate-900 flex items-center gap-2 transition-colors"
-                  title="My Profile & Settings"
-                 >
-                   <Settings size={16} />
-                   <span className="hidden sm:inline">Settings</span>
-                 </button>
-
-                 <button
-                  onClick={onStartOver}
-                  disabled={planMutationsDisabled}
-                  className="text-sm font-medium text-slate-500 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2 transition-colors"
-                  title="Deactivate this Current Weekly Plan"
-                 >
-                   <RotateCcw size={16} />
-                   <span className="hidden sm:inline">Start Over</span>
-                 </button>
                </>
              )}
-             
-             <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
-             
-             <button
-               onClick={onLogout}
-               className="text-sm font-medium text-slate-500 hover:text-red-600 flex items-center gap-2 transition-colors"
-               title="Logout"
-             >
-               <LogOut size={16} />
-               <span className="hidden sm:inline">Logout</span>
-             </button>
           </nav>
         </div>
       </header>

@@ -98,3 +98,20 @@ works locally as long as the function is deployed and its secret is set.
 supabase functions serve generate-meal-plan --env-file supabase/.env.local
 # supabase/.env.local should contain OPENAI_API_KEY=... (this file is gitignored)
 ```
+## Account and Auth configuration
+
+Before releasing the Account experience:
+
+- Apply `20260729135108_create_health_profile_plan_replacement_commands.sql`
+  before deploying the updated `generate-meal-plan` Edge Function and web app.
+- In Supabase Auth, require the current password for authenticated password
+  changes and enforce a minimum of eight characters with at least one letter
+  and one number.
+- Enable leaked-password rejection when the project plan supports it. Do not
+  enable age-based emailed reauthentication for this release.
+- Add the production `/recover-password` URL to the Auth redirect allow-list
+  and verify that production SMTP can deliver recovery emails.
+- Exercise password change, password recovery, terminal replacement failure,
+  stale recovery, and authoritative replacement sync in the deployed
+  environment. Local configuration and automated tests do not prove hosted
+  Auth settings are active.

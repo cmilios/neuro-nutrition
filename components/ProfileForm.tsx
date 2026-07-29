@@ -5,27 +5,49 @@ import { healthService } from '../services/healthService';
 
 interface ProfileFormProps {
   initialData?: UserProfile | null;
-  onSubmit: (profile: UserProfile) => void;
+  onSubmit: (profile: UserProfile) => void | Promise<void>;
   isLoading: boolean;
   isEditing?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  onPlanRelevantDirtyChange?: (dirty: boolean) => void;
 }
 
-const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoading, isEditing = false }) => {
-  const [formData, setFormData] = useState<UserProfile>({
-    age: 30,
-    gender: Gender.Male,
-    heightCm: 175,
-    weightKg: 75,
-    targetWeightKg: 70,
-    activityLevel: ActivityLevel.ModeratelyActive,
-    goal: Goal.LoseWeight,
-    dietType: DietType.Standard,
-    allergies: '',
-    photo: ''
-  });
+const defaultHealthProfile: UserProfile = {
+  age: 30,
+  gender: Gender.Male,
+  heightCm: 175,
+  weightKg: 75,
+  targetWeightKg: 70,
+  activityLevel: ActivityLevel.ModeratelyActive,
+  goal: Goal.LoseWeight,
+  dietType: DietType.Standard,
+  allergies: '',
+  photo: '',
+};
+
+const planRelevantFields: Array<keyof UserProfile> = [
+  'age',
+  'gender',
+  'heightCm',
+  'weightKg',
+  'targetWeightKg',
+  'activityLevel',
+  'goal',
+  'dietType',
+  'allergies',
+];
+
+const ProfileForm: React.FC<ProfileFormProps> = ({
+  initialData,
+  onSubmit,
+  isLoading,
+  isEditing = false,
+  onDirtyChange,
+  onPlanRelevantDirtyChange,
+}) => {
+  const [formData, setFormData] = useState<UserProfile>(defaultHealthProfile);
 
   const [isSyncingHealth, setIsSyncingHealth] = useState(false);
-  const [shouldRegenerate, setShouldRegenerate] = useState(false);
 
   useEffect(() => {
     if (initialData) {
@@ -35,10 +57,18 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoad
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: (name === 'age' || name === 'heightCm' || name === 'weightKg' || name === 'targetWeightKg') ? Number(value) : value
-    }));
+    setFormData(prev => {
+      const baseline = initialData ?? defaultHealthProfile;
+      const next = {
+        ...prev,
+        [name]: (name === 'age' || name === 'heightCm' || name === 'weightKg' || name === 'targetWeightKg') ? Number(value) : value
+      };
+      onDirtyChange?.(JSON.stringify(next) !== JSON.stringify(baseline));
+      onPlanRelevantDirtyChange?.(
+        planRelevantFields.some((field) => next[field] !== baseline[field]),
+      );
+      return next;
+    });
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,7 +76,13 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoad
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, photo: reader.result as string }));
+        setFormData(prev => {
+          const next = { ...prev, photo: reader.result as string };
+          onDirtyChange?.(
+            JSON.stringify(next) !== JSON.stringify(initialData ?? defaultHealthProfile),
+          );
+          return next;
+        });
       };
       reader.readAsDataURL(file);
     }
@@ -57,15 +93,13 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoad
     try {
       const healthData = await healthService.syncAppleHealth();
       
-      // Check if critical metrics changed to suggest regeneration
-      if (initialData && healthData.weightKg && Math.abs(healthData.weightKg - initialData.weightKg) > 1) {
-        setShouldRegenerate(true);
-      }
-
-      setFormData(prev => ({
-        ...prev,
-        ...healthData
-      }));
+      setFormData(prev => {
+        const next = { ...prev, ...healthData };
+        onDirtyChange?.(
+          JSON.stringify(next) !== JSON.stringify(initialData ?? defaultHealthProfile),
+        );
+        return next;
+      });
     } catch (error) {
       console.error("Failed to sync health data", error);
     } finally {
@@ -75,23 +109,7 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoad
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // If editing and regeneration is requested (or new profile), triggering logic is handled by parent or simply passing data back
-    // The parent App.tsx handles the actual regeneration call if needed, but here we just pass the profile.
-    // However, to support the checkbox logic "Regenerate Plan", we might need to pass a flag or let the parent decide based on changes.
-    // For simplicity in this demo, we just pass the profile. The checkbox is mainly visual in this specific implementation 
-    // unless we change the onSubmit signature. 
-    // *Self-correction*: The prompt implied updating the profile. If the user wants to regenerate, they usually click "Generate Meal Plan".
-    // If isEditing is true, we might just update the profile data store.
-    
-    // To support the "Regenerate" feature properly, we will append a flag to the parent if possible, 
-    // but since the interface is fixed, we'll assume the parent compares data or we simply always regenerate if the user clicks the main CTA in 'edit' mode if we changed the button text.
-    
-    // Actually, let's keep it simple: If isEditing, we just call onSubmit. 
-    // The parent `handleUpdateProfile` in App.tsx just saves data. 
-    // To trigger regeneration from Edit mode, we would need a separate flow. 
-    // Let's assume for now this form updates the profile object.
-    
-    onSubmit(formData);
+    void onSubmit(formData);
   };
 
   return (
@@ -298,24 +316,6 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ initialData, onSubmit, isLoad
             </div>
           </div>
         </div>
-
-        {/* Edit Mode Regenerate Checkbox */}
-        {isEditing && (
-           <div className="px-8 pb-4">
-              <label className="flex items-center gap-3 p-4 border border-emerald-100 bg-emerald-50/50 rounded-xl cursor-pointer hover:bg-emerald-50 transition-colors">
-                 <input 
-                   type="checkbox" 
-                   checked={shouldRegenerate} 
-                   onChange={(e) => setShouldRegenerate(e.target.checked)}
-                   className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 border-gray-300"
-                 />
-                 <div>
-                    <div className="font-semibold text-slate-800 text-sm">Regenerate Meal Plan?</div>
-                    <div className="text-xs text-slate-500">Create a new plan optimized for these new biometrics.</div>
-                 </div>
-              </label>
-           </div>
-        )}
 
         <div className={`${!isEditing ? 'bg-slate-50 p-6 border-t border-slate-100' : 'pt-6'} flex justify-end`}>
           <button

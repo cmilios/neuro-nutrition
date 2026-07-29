@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { weeklyPlanFixture } from "./test/weeklyPlanFixture";
@@ -40,6 +40,9 @@ const {
   saveCurrent,
   setIngredientChecked,
   startOver,
+  logout,
+  changePassword,
+  sendPasswordRecovery,
 } = vi.hoisted(() => ({
   edgeFunctionInvoke: vi.fn(),
   getProfileData: vi.fn(),
@@ -50,6 +53,9 @@ const {
   saveCurrent: vi.fn(),
   setIngredientChecked: vi.fn(),
   startOver: vi.fn(),
+  logout: vi.fn(),
+  changePassword: vi.fn(),
+  sendPasswordRecovery: vi.fn(),
 }));
 
 vi.mock("./services/supabaseClient", () => ({
@@ -91,7 +97,12 @@ vi.mock("./services/weeklyPlanGateway", () => ({
 }));
 
 vi.mock("./services/authService", () => ({
-  authService: { logout: vi.fn() },
+  authService: {
+    logout,
+    changePassword,
+    sendPasswordRecovery,
+    completePasswordRecovery: vi.fn(),
+  },
 }));
 
 import App from "./App";
@@ -188,6 +199,9 @@ describe("application generation flow", () => {
       result: null,
       error: null,
     }));
+    logout.mockReset().mockResolvedValue(undefined);
+    changePassword.mockReset().mockResolvedValue(undefined);
+    sendPasswordRecovery.mockReset().mockResolvedValue(undefined);
   });
 
   it("generates and renders the returned Weekly Plan", async () => {
@@ -561,7 +575,7 @@ describe("application generation flow", () => {
     render(<App />);
 
     await screen.findByText("Test Berry Breakfast");
-    await user.click(screen.getByTitle("My Profile & Settings"));
+    await user.click(screen.getByTitle("Account"));
     const ageInput = screen.getAllByRole("spinbutton")[0];
     await user.clear(ageInput);
     await user.type(ageInput, "31");
@@ -573,7 +587,7 @@ describe("application generation flow", () => {
       [],
     ));
 
-    await user.click(screen.getByTitle("My Profile & Settings"));
+    await user.click(screen.getByTitle("Account"));
     await user.click(screen.getByRole("button", { name: "Milestones" }));
     const milestoneWeight = screen.getAllByRole("spinbutton")[0];
     await user.clear(milestoneWeight);
@@ -593,6 +607,285 @@ describe("application generation flow", () => {
       [],
     ));
     expect(saveCurrent).not.toHaveBeenCalled();
+  });
+
+  it("opens Account from the identity and protects Health Profile drafts across sections", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    const trigger = screen.getByRole("button", { name: "Open Account" });
+    await user.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Health Profile" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+
+    const ageInput = screen.getAllByRole("spinbutton")[0];
+    await user.clear(ageInput);
+    await user.type(ageInput, "31");
+    const replacement = screen.getByRole("checkbox", {
+      name: /Create a new Weekly Plan from these changes/,
+    });
+    expect(replacement).not.toBeChecked();
+
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+    expect(screen.getByRole("alertdialog", {
+      name: "Discard unsaved Health Profile changes?",
+    })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Keep Editing" }));
+    expect(screen.getAllByRole("spinbutton")[0]).toHaveValue(31);
+
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+    await user.click(screen.getByRole("button", { name: "Discard Changes" }));
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Security");
+
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    await waitFor(() => expect(screen.getByLabelText(/^Current password/)).toHaveFocus());
+    await user.type(screen.getByLabelText(/^Current password/), "old-secret1");
+    await user.type(screen.getByLabelText(/^New password/), "new-secret2");
+    await user.type(screen.getByLabelText("Confirm new password"), "new-secret2");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+    await waitFor(() => expect(changePassword).toHaveBeenCalledWith(
+      "old-secret1",
+      "new-secret2",
+    ));
+    expect(await screen.findByText("Password changed. Other sessions were signed out."))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
+
+    await user.click(screen.getAllByRole("button", { name: "Close Account" }).at(-1)!);
+    expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("protects Account setup edits before a Health Profile has been completed", async () => {
+    getProfileData.mockResolvedValue(null);
+    getCurrent.mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Let's build your plan." });
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    const account = screen.getByRole("dialog", { name: "Account" });
+    const accountAge = within(account).getAllByRole("spinbutton")[0];
+    await user.clear(accountAge);
+    await user.type(accountAge, "31");
+    await user.click(within(account).getByRole("button", { name: "Close Account" }));
+
+    expect(screen.getByRole("alertdialog", {
+      name: "Discard unsaved Health Profile changes?",
+    })).toBeInTheDocument();
+  });
+
+  it("gives a safe next action when a password change requires stronger authentication", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    changePassword.mockRejectedValue(Object.assign(
+      new Error("provider-specific message"),
+      { code: "insufficient_aal" },
+    ));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+    await user.type(screen.getByLabelText(/^Current password/), "old-secret1");
+    await user.type(screen.getByLabelText(/^New password/), "new-secret2");
+    await user.type(screen.getByLabelText("Confirm new password"), "new-secret2");
+    await user.click(screen.getByRole("button", { name: "Change password" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Multi-factor verification is required before you can change your password.",
+    );
+  });
+
+  it("saves corrected Health Profile data before safely replacing the Current Weekly Plan", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const replacementPlan = structuredClone(weeklyPlanFixture);
+    replacementPlan.weeklySummary = "Tailored replacement";
+    edgeFunctionInvoke
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "failed",
+          result: null,
+          error: {
+            code: "generation_failed",
+            message: "Provider unavailable. Your previous plan is unchanged.",
+            retryable: true,
+          },
+        },
+        error: null,
+      }))
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000099",
+            userId: "user-1",
+            document: replacementPlan,
+            schemaVersion: 1,
+            revision: 0,
+            isActive: true,
+            createdAt: "2026-07-29T10:00:00.000Z",
+            updatedAt: "2026-07-29T10:00:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: "00000000-0000-4000-8000-000000000010",
+            generationId: body.commandId,
+          },
+          error: null,
+        },
+        error: null,
+      }));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    const ageInput = screen.getAllByRole("spinbutton")[0];
+    await user.clear(ageInput);
+    await user.type(ageInput, "31");
+    await user.click(screen.getByRole("checkbox", {
+      name: /Create a new Weekly Plan from these changes/,
+    }));
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+
+    expect(await screen.findByText("Provider unavailable. Your previous plan is unchanged."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Provider unavailable. Your previous plan is unchanged.",
+    );
+    expect(screen.getByRole("alert")).toHaveClass("text-red-700");
+    expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
+    expect(saveProfileData).toHaveBeenCalledBefore(edgeFunctionInvoke);
+    const firstCommandId = edgeFunctionInvoke.mock.calls[0][1].body.commandId;
+
+    await user.click(screen.getByRole("button", { name: "Retry Weekly Plan replacement" }));
+
+    expect(await screen.findByText("Tailored replacement")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Account" })).not.toBeInTheDocument();
+    const secondCommandId = edgeFunctionInvoke.mock.calls[1][1].body.commandId;
+    expect(secondCommandId).not.toBe(firstCommandId);
+    expect(edgeFunctionInvoke).toHaveBeenLastCalledWith(
+      "generate-meal-plan",
+      expect.objectContaining({
+        body: expect.objectContaining({
+          operation: "health_profile_plan_replacement",
+          profile: expect.objectContaining({ age: 31 }),
+        }),
+      }),
+    );
+  });
+
+  it("recovers and resumes a stale Health Profile replacement after reload", async () => {
+    const profile = {
+      age: 31,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    const lockedCommandId = "00000000-0000-4000-8000-000000000080";
+    const replacementPlan = structuredClone(weeklyPlanFixture);
+    replacementPlan.weeklySummary = "Recovered replacement";
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getCurrent.mockResolvedValue({
+      planId: "00000000-0000-4000-8000-000000000010",
+      userId: "user-1",
+      document: weeklyPlanFixture,
+      schemaVersion: 1,
+      revision: 0,
+      isActive: true,
+      createdAt: "2026-07-27T10:00:00.000Z",
+      updatedAt: "2026-07-27T10:00:00.000Z",
+      deactivatedAt: null,
+      predecessorPlanId: null,
+      generationId: null,
+      nextGenerationId: null,
+      nextGenerationLockedAt: null,
+      healthProfileReplacementId: lockedCommandId,
+      healthProfileReplacementLockedAt: "2026-07-29T10:00:00.000Z",
+    });
+    edgeFunctionInvoke
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "failed",
+          result: null,
+          error: {
+            code: "stale_generation_recovered",
+            message: "Retry.",
+            retryable: true,
+          },
+        },
+        error: null,
+      }))
+      .mockImplementationOnce(async (_name, { body }) => ({
+        data: {
+          commandId: body.commandId,
+          status: "succeeded",
+          result: {
+            planId: "00000000-0000-4000-8000-000000000099",
+            userId: "user-1",
+            document: replacementPlan,
+            schemaVersion: 1,
+            revision: 0,
+            isActive: true,
+            createdAt: "2026-07-29T10:20:00.000Z",
+            updatedAt: "2026-07-29T10:20:00.000Z",
+            deactivatedAt: null,
+            predecessorPlanId: "00000000-0000-4000-8000-000000000010",
+            generationId: body.commandId,
+            nextGenerationId: null,
+            nextGenerationLockedAt: null,
+            healthProfileReplacementId: null,
+            healthProfileReplacementLockedAt: null,
+          },
+          error: null,
+        },
+        error: null,
+      }));
+
+    render(<App />);
+
+    expect(await screen.findByText("Recovered replacement")).toBeInTheDocument();
+    expect(edgeFunctionInvoke).toHaveBeenCalledTimes(2);
+    expect(edgeFunctionInvoke.mock.calls[0][1].body.commandId).toBe(lockedCommandId);
+    expect(edgeFunctionInvoke.mock.calls[0][1].body.resumeExisting).toBe(true);
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId).not.toBe(lockedCommandId);
+    expect(edgeFunctionInvoke.mock.calls[1][1].body.resumeExisting).toBe(false);
   });
 
   it("preserves the original meal and uses a new command after terminal Meal Reroll failure", async () => {

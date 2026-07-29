@@ -19,6 +19,8 @@ export type WeeklyPlanRolloutState =
 
 export interface GenerationRequest {
   action: "plan" | "meal";
+  operation?: "health_profile_plan_replacement";
+  resumeExisting?: boolean;
   commandId?: string;
   profile: Record<string, unknown>;
   feedback?: MealReviewFeedback[];
@@ -72,7 +74,9 @@ export interface GenerateMealPlanDependencies {
   persist(record: GenerationRecord): Promise<void>;
   initialGeneration?: InitialGenerationCommandStore;
   nextGeneration?: NextWeeklyPlanCommandStore;
+  profileReplacement?: NextWeeklyPlanCommandStore;
   mealReroll?: MealRerollCommandStore;
+  loadHealthProfile?: (userId: string) => Promise<Record<string, unknown> | null>;
   getRolloutState?: () => Promise<WeeklyPlanRolloutState>;
 }
 
@@ -89,6 +93,7 @@ export interface InitialGenerationCommandOutcome {
   error: WeeklyPlanCommandError | null;
   shouldGenerate: boolean;
   checkpoint?: InitialGenerationCheckpoint | null;
+  inputFingerprint?: string;
 }
 
 export interface MealRerollTarget {
@@ -134,6 +139,9 @@ export interface NextWeeklyPlanCommandStore {
       retryable: boolean;
       evidence: Record<string, unknown>;
     },
+  ): Promise<NextWeeklyPlanCommandOutcome>;
+  recover?(
+    identity: Pick<InitialGenerationCommandIdentity, "commandId" | "userId">,
   ): Promise<NextWeeklyPlanCommandOutcome>;
 }
 
@@ -295,6 +303,16 @@ async function fingerprintNextGeneration(request: GenerationRequest): Promise<st
   return sha256Hex(normalized);
 }
 
+async function fingerprintProfileReplacement(request: GenerationRequest): Promise<string> {
+  const normalized = JSON.stringify(normalizeForFingerprint({
+    operation: "replace_from_health_profile",
+    profile: request.profile,
+    displayedPlanId: request.displayedPlanId,
+    displayedRevision: request.displayedRevision,
+  }));
+  return sha256Hex(normalized);
+}
+
 const commandResponse = (
   outcome: InitialGenerationCommandOutcome & {
     target?: MealRerollTarget | null;
@@ -304,6 +322,7 @@ const commandResponse = (
   const {
     shouldGenerate: _shouldGenerate,
     checkpoint: _checkpoint,
+    inputFingerprint: _inputFingerprint,
     target: _target,
     source: _source,
     ...response
@@ -319,6 +338,15 @@ function parseGenerationRequest(value: unknown): GenerationRequest {
   const body = value as Record<string, unknown>;
   if (body.action !== "plan" && body.action !== "meal") {
     throw new HttpError("Invalid action.", 400, "invalid_action");
+  }
+  if (
+    body.operation !== undefined
+    && body.operation !== "health_profile_plan_replacement"
+  ) {
+    throw new HttpError("Invalid operation.", 400, "invalid_operation");
+  }
+  if (body.resumeExisting !== undefined && typeof body.resumeExisting !== "boolean") {
+    throw new HttpError("Invalid resume flag.", 400, "invalid_resume_flag");
   }
   if (!body.profile || typeof body.profile !== "object" || Array.isArray(body.profile)) {
     throw new HttpError("Missing profile.", 400, "invalid_profile");
@@ -479,8 +507,203 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
         );
       }
 
+      const isProfileReplacement =
+        generationRequest.action === "plan"
+        && generationRequest.operation === "health_profile_plan_replacement";
+      if (isProfileReplacement && dependencies.profileReplacement) {
+        if (
+          typeof generationRequest.commandId !== "string"
+          || !commandIdPattern.test(generationRequest.commandId)
+          || typeof generationRequest.displayedPlanId !== "string"
+          || !commandIdPattern.test(generationRequest.displayedPlanId)
+          || typeof generationRequest.displayedRevision !== "number"
+          || !Number.isInteger(generationRequest.displayedRevision)
+          || generationRequest.displayedRevision < 0
+        ) {
+          throw new HttpError(
+            "A valid Health Profile Plan Replacement command is required.",
+            400,
+            "invalid_command",
+          );
+        }
+
+        let resumed: NextWeeklyPlanCommandOutcome | null = null;
+        if (generationRequest.resumeExisting) {
+          if (!dependencies.profileReplacement.recover) {
+            throw new HttpError(
+              "Health Profile Plan Replacement recovery is unavailable.",
+              503,
+              "health_profile_recovery_unavailable",
+            );
+          }
+          resumed = await dependencies.profileReplacement.recover({
+            commandId: generationRequest.commandId,
+            userId: user.id,
+          });
+          if (!resumed.inputFingerprint) {
+            throw new HttpError(
+              "The persisted replacement identity is unavailable.",
+              503,
+              "health_profile_recovery_identity_unavailable",
+            );
+          }
+        } else {
+          if (!dependencies.loadHealthProfile) {
+            throw new HttpError(
+              "Saved Health Profile loading is unavailable.",
+              503,
+              "health_profile_unavailable",
+            );
+          }
+          const savedProfile = await dependencies.loadHealthProfile(user.id);
+          if (!savedProfile) {
+            throw new HttpError(
+              "A saved Health Profile is required.",
+              409,
+              "health_profile_missing",
+            );
+          }
+          generationRequest = {
+            ...generationRequest,
+            profile: savedProfile,
+          };
+        }
+
+        const identity = {
+          commandId: generationRequest.commandId,
+          userId: user.id,
+          inputFingerprint: resumed?.inputFingerprint
+            ?? await fingerprintProfileReplacement(generationRequest),
+        };
+        const finalizeCheckpoint = async (
+          outcome: NextWeeklyPlanCommandOutcome,
+        ): Promise<Response> => {
+          const checkpoint = outcome.checkpoint;
+          if (!checkpoint) return json(commandResponse(outcome));
+
+          const usagePersisted = await persistAndReport(
+            user!,
+            generationRequest!,
+            checkpoint.usageRecord,
+          );
+          if (!usagePersisted) {
+            throw new HttpError(
+              "The provider attempt is awaiting durable reconciliation.",
+              503,
+              "usage_persistence_failed",
+            );
+          }
+          if (checkpoint.kind === "unknown") {
+            throw new HttpError(
+              "The provider outcome is unknown and requires reconciliation.",
+              503,
+              "generation_outcome_unknown",
+            );
+          }
+          if (checkpoint.kind === "failure") {
+            const failed = await dependencies.profileReplacement!.fail({
+              ...identity,
+              errorCode: checkpoint.error.code,
+              errorMessage: checkpoint.error.message,
+              retryable: checkpoint.error.retryable,
+              evidence: checkpoint.evidence,
+            });
+            return json(commandResponse(failed));
+          }
+          const completed = await dependencies.profileReplacement!.complete({
+            ...identity,
+            document: checkpoint.document,
+          });
+          return json(commandResponse(completed));
+        };
+
+        if (resumed) {
+          return await finalizeCheckpoint(resumed);
+        }
+
+        let started = await dependencies.profileReplacement.begin({
+          ...identity,
+          sourcePlanId: generationRequest.displayedPlanId,
+          sourceRevision: generationRequest.displayedRevision,
+        });
+        if (!started.shouldGenerate) {
+          if (
+            started.status === "in_progress"
+            && dependencies.profileReplacement.recover
+          ) {
+            started = await dependencies.profileReplacement.recover({
+              commandId: identity.commandId,
+              userId: identity.userId,
+            });
+          }
+          return await finalizeCheckpoint(started);
+        }
+
+        let result: GenerationResult;
+        try {
+          result = await dependencies.generate({
+            ...generationRequest,
+            feedback: undefined,
+            currentPlan: undefined,
+            reviewType: undefined,
+            attempt: 1,
+          });
+        } catch (error) {
+          if (error instanceof ProviderGenerationError) {
+            const checkpointed = await dependencies.profileReplacement.checkpoint({
+              ...identity,
+              checkpoint: {
+                kind: error.outcomeUnknown ? "unknown" : "failure",
+                usageRecord: error.usageRecord,
+                error: {
+                  code: error.outcomeUnknown
+                    ? "generation_outcome_unknown"
+                    : "generation_failed",
+                  message: error.outcomeUnknown
+                    ? "The provider outcome is unknown and requires reconciliation."
+                    : "Weekly Plan replacement failed. Your previous plan is unchanged.",
+                  retryable: !error.outcomeUnknown,
+                },
+                evidence: {
+                  stage: "provider",
+                  reason: error.code,
+                  callId: error.usageRecord.callId,
+                  attempt: error.usageRecord.attempt,
+                  providerRequestId: error.usageRecord.providerRequestId,
+                  providerResponseId: error.usageRecord.providerResponseId,
+                },
+              },
+            });
+            return await finalizeCheckpoint(checkpointed);
+          }
+
+          const failed = await dependencies.profileReplacement.fail({
+            ...identity,
+            errorCode: "generation_failed",
+            errorMessage: "Weekly Plan replacement failed. Your previous plan is unchanged.",
+            retryable: true,
+            evidence: {
+              stage: "generation",
+              reason: error instanceof HttpError ? error.code : "unexpected_error",
+            },
+          });
+          return json(commandResponse(failed));
+        }
+
+        const checkpointed = await dependencies.profileReplacement.checkpoint({
+          ...identity,
+          checkpoint: {
+            kind: "success",
+            document: result.data,
+            usageRecord: result.usageRecord,
+          },
+        });
+        return await finalizeCheckpoint(checkpointed);
+      }
+
       const isInitialGeneration =
         generationRequest.action === "plan" &&
+        generationRequest.operation === undefined &&
         generationRequest.reviewType === undefined &&
         generationRequest.currentPlan === undefined;
       if (isInitialGeneration && dependencies.initialGeneration) {
