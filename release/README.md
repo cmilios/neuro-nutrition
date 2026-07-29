@@ -24,8 +24,9 @@ The runner has no plan-mutation path. Client telemetry is allow-listed,
 content-free, best-effort, and cannot interrupt application behavior. Configure
 the required `VITE_CLIENT_INCIDENT_ALERT_URL` deployment secret to route a
 telemetry-storage outage to an independent, abuse-protected operator alert
-endpoint. Configure `CLIENT_INCIDENT_ALERT_HEALTH_URL` as its read-only health
-check; deployment fails if either is missing or the endpoint is unreachable.
+endpoint. Alert configuration and reachability are delivery-gate evidence:
+until they are verified, the final report remains blocked without preventing
+the application from being built or deployed.
 
 After at least 24 hours, assemble every timestamped monitor artifact into the
 input and create the immutable final report with `npm.cmd run
