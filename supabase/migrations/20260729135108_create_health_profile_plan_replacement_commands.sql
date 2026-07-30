@@ -9,6 +9,7 @@ alter table public.weekly_plan_commands
     'reroll_meal',
     'generate_next',
     'start_over',
+    'legacy_migration',
     'replace_from_health_profile'
   ));
 

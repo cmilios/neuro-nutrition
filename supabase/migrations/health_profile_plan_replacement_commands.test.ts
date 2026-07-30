@@ -205,4 +205,15 @@ describe("Health Profile Plan Replacement database command", () => {
     `)).rejects.toThrow(/permission denied/i);
     await database.exec('reset role; reset "request.jwt.claim.sub";');
   });
+
+  it("preserves the historical legacy migration command operation", async () => {
+    const constraint = await database.query<{ definition: string }>(`
+      select pg_get_constraintdef(oid) as definition
+      from pg_constraint
+      where conrelid = 'public.weekly_plan_commands'::regclass
+        and conname = 'weekly_plan_commands_operation'
+    `);
+
+    expect(constraint.rows[0].definition).toContain("legacy_migration");
+  });
 });
