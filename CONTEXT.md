@@ -60,6 +60,10 @@ _Avoid_: Reset account, delete account
 The user's biometrics, activity, goals, dietary preferences and restrictions used to tailor Weekly Plans, together with milestones that record progress.
 _Avoid_: User Profile, biometrics
 
+**Display Name**:
+The name shown for an authenticated user in NeuroNutrition account and navigation surfaces. It is account identity metadata and is not part of the Health Profile; when an authentication provider supplies no usable name, the user must provide one before entering the app.
+_Avoid_: Username, Health Profile name
+
 **Health Profile Plan Replacement**:
 A Weekly Plan generated from updated plan-relevant Health Profile data that replaces the Current Weekly Plan only after successful generation and does not apply Meal Review retention rules.
 _Avoid_: Regenerate plan, profile refresh, Next Weekly Plan
