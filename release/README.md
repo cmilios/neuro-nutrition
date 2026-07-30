@@ -28,6 +28,21 @@ endpoint. Alert configuration and reachability are delivery-gate evidence:
 until they are verified, the final report remains blocked without preventing
 the application from being built or deployed.
 
+The schedule is disabled by default so an unprovisioned monitor does not create
+continuous failed GitHub Actions runs. Before enabling it:
+
+1. Apply `20260729120000_create_weekly_plan_observation.sql`.
+2. Deploy the database, release-identity, and function-failure GET probes.
+3. Configure their `OBSERVATION_*_URL` and least-privilege
+   `OBSERVATION_*_TOKEN` repository secrets. `OBSERVATION_ALERT_URL` is
+   optional.
+4. Run `Observe authoritative Weekly Plan` manually and confirm it passes.
+5. Set the repository Actions variable `WEEKLY_PLAN_OBSERVATION_ENABLED` to
+   `true`.
+
+Removing that variable, or changing it to any other value, pauses scheduled
+observation without weakening the monitor's fail-closed behavior when it runs.
+
 After at least 24 hours, assemble every timestamped monitor artifact into the
 input and create the immutable final report with `npm.cmd run
 observation:report`. It derives cadence from those timestamps and says

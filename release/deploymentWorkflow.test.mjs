@@ -14,3 +14,19 @@ describe("GitHub Pages deployment workflow", () => {
     expect(workflow).toContain("VITE_CLIENT_INCIDENT_ALERT_URL");
   });
 });
+
+describe("scheduled Weekly Plan observation workflow", () => {
+  it("runs on schedule only after observation infrastructure is explicitly enabled", async () => {
+    const workflow = (
+      await readFile(
+        new URL("../.github/workflows/observe-weekly-plan.yml", import.meta.url),
+        "utf8",
+      )
+    ).replaceAll("\r\n", "\n");
+
+    expect(workflow).toContain(
+      "github.event_name == 'workflow_dispatch' ||\n"
+      + "      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'true'",
+    );
+  });
+});
