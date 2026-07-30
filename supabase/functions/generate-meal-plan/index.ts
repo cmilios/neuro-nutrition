@@ -3,8 +3,8 @@
 // Server-side proxy to the OpenAI Responses API. The OpenAI API key lives ONLY
 // here, as a Supabase secret (OPENAI_API_KEY) — it is never shipped
 // to the browser. The browser calls this function with the signed-in user's
-// Supabase JWT; the platform verifies that JWT (keep `verify_jwt` enabled), so
-// only authenticated users can generate plans.
+// Supabase JWT. The function validates that session with Supabase Auth before
+// any application behavior runs.
 //
 // Deploy:  supabase functions deploy generate-meal-plan --project-ref <ref>
 // Secrets: supabase secrets set OPENAI_API_KEY=sk-...  --project-ref <ref>
@@ -20,6 +20,7 @@ import {
   type GenerationResult,
 } from "./handler.ts";
 import { createOpenAIUsageRecord } from "./usage.ts";
+import { createReleaseIdentityHandler } from "./releaseIdentity.ts";
 import {
   createHealthProfilePlanReplacementCommandStore,
   createInitialGenerationCommandStore,
@@ -618,7 +619,7 @@ if (!supabaseUrl || !serviceRoleKey) {
   throw new Error("Weekly Plan command persistence is not configured");
 }
 
-const handler = createGenerateMealPlanHandler({
+const applicationHandler = createGenerateMealPlanHandler({
   authenticate: requireAuthenticatedUser,
   generate,
   persist: persistUsageRecord,
@@ -645,4 +646,17 @@ const handler = createGenerateMealPlanHandler({
   }),
 });
 
-Deno.serve(handler);
+const releaseIdentityHandler = createReleaseIdentityHandler({
+  expectedTokenHash:
+    "9211a1250a23b36181c4bc82cbe7f2acd76dc779c3606c34776185e6dd6dfb30",
+  expectedVersion: 17,
+  deploymentId: () => Deno.env.get("DENO_DEPLOYMENT_ID"),
+});
+
+Deno.serve((request) => {
+  const path = new URL(request.url).pathname;
+  if (path.endsWith("/release-identity")) {
+    return releaseIdentityHandler(request);
+  }
+  return applicationHandler(request);
+});

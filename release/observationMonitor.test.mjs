@@ -27,15 +27,22 @@ describe("observation monitor", () => {
 
     const result = await runObservationMonitor({
       databaseUrl: "https://example.test/database",
+      databaseToken: "database-token",
       releaseIdentityUrl: "https://example.test/release",
+      releaseIdentityToken: "release-token",
       functionFailuresUrl: "https://example.test/functions",
+      functionFailuresToken: "function-token",
     });
 
     expect(result.evaluation.status).toBe("passed");
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const [, options] of fetchMock.mock.calls) {
       expect(options.method).toBe("GET");
+      expect(options.headers).not.toHaveProperty("apikey");
     }
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+      Authorization: "Bearer database-token",
+    });
   });
 
   it("alerts without a plan mutation when monitoring is unavailable", async () => {

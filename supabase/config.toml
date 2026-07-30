@@ -13,5 +13,11 @@ password_requirements = "letters_digits"
 secure_password_change = true
 
 [functions.generate-meal-plan]
-# Keep JWT verification ON so only authenticated users can call the AI proxy.
-verify_jwt = true
+# Authentication is enforced inside the function. This also permits the
+# separate hashed monitoring credential on its GET-only release endpoint.
+verify_jwt = false
+
+[functions.weekly-plan-observation]
+# The function verifies a dedicated high-entropy bearer token by hash before
+# accessing any probe. Supabase API keys are never exposed to the runner.
+verify_jwt = false

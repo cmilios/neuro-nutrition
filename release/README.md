@@ -47,6 +47,27 @@ validation; `true` permits both dispatched and scheduled observation. This
 keeps an unprovisioned monitor quiet without weakening its fail-closed behavior
 when it is deliberately enabled.
 
+The production implementation uses the `weekly-plan-observation` Edge Function
+for the aggregate database and function-failure probes. The
+`generate-meal-plan` Edge Function exposes a GET-only release-identity route.
+Both verify the same high-entropy monitoring bearer credential by its SHA-256
+digest; the credential itself exists only in GitHub Actions. Supabase's service
+credential remains inside the observation function and is never sent to the
+runner.
+
+The three configured probe URLs are:
+
+- `...?probe=database`
+- `...?probe=release-identity`
+- `...?probe=function-failures`
+
+To rotate the monitoring credential, generate a new random 256-bit value, write
+it to all three `OBSERVATION_*_TOKEN` GitHub secrets, replace its digest in both
+Edge Functions, and deploy both functions together. A deliberate
+`generate-meal-plan` deployment must also update the expected immutable
+deployment version passed to its release-identity handler in `index.ts`; an
+unreviewed redeployment then fails the release-identity check closed.
+
 After at least 24 hours, assemble every timestamped monitor artifact into the
 input and create the immutable final report with `npm.cmd run
 observation:report`. It derives cadence from those timestamps and says

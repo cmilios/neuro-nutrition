@@ -8,7 +8,7 @@ async function readProbe(url, token) {
   try {
     const response = await fetch(url, {
       method: "GET",
-      headers: token ? { Authorization: `Bearer ${token}`, apikey: token } : {},
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     if (!response.ok) return { error: `http_${response.status}` };
     return await response.json();

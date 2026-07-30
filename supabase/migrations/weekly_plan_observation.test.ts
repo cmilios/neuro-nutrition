@@ -19,6 +19,7 @@ const migrationNames = [
   "20260727180000_cut_over_legacy_weekly_plans.sql",
   "20260727180100_finalize_legacy_weekly_plan_cutover.sql",
   "20260729120000_create_weekly_plan_observation.sql",
+  "20260730071049_add_observation_function_failure_probe.sql",
 ];
 const migrationPaths = migrationNames.map((name) =>
   fileURLToPath(new URL(`./${name}`, import.meta.url))
@@ -101,6 +102,15 @@ describe("Weekly Plan observation database contract", () => {
       planInvariants: { violations: 0 },
       migrationEvidence: { valid: true },
     }));
+    const functionFailures = await database.query<{
+      failures: { critical: number; total: number };
+    }>(`
+      select public.get_weekly_plan_function_failures() as failures
+    `);
+    expect(functionFailures.rows[0].failures).toEqual({
+      critical: 0,
+      total: 0,
+    });
     await database.exec("set role weekly_plan_monitor;");
     await expect(database.query("select * from public.weekly_plans"))
       .rejects.toThrow();
