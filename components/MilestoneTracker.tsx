@@ -113,7 +113,7 @@ const MilestoneTracker: React.FC<MilestoneTrackerProps> = ({
             <p className="text-slate-400 text-sm italic text-center py-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">No milestones logged yet.</p>
           ) : (
             sortedMilestones.map((ms) => (
-              <div key={ms.id} className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-xl hover:border-emerald-200 transition-colors group shadow-sm">
+              <div key={ms.id} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-xl hover:border-emerald-200 transition-colors group shadow-sm">
                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                     <div>
                         <div className="font-bold text-slate-800 text-lg">{ms.weight} <span className="text-sm font-normal text-slate-400">kg</span></div>

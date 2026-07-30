@@ -224,7 +224,7 @@ const MealCard: React.FC<MealCardProps> = ({
   return (
     <div 
       onClick={onClick}
-      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:-translate-y-1 transition-all overflow-hidden group relative cursor-pointer"
+      className="bg-white rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5 hover:border-slate-300 hover:shadow-lg hover:-translate-y-1 transition-all overflow-hidden group relative cursor-pointer"
     >
       {isLoading && (
         <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex items-center justify-center cursor-default" onClick={e => e.stopPropagation()}>

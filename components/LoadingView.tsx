@@ -6,7 +6,7 @@ const LoadingView: React.FC = () => {
     <div className="flex flex-col items-center justify-center py-20 animate-fade-in">
       <div className="relative mb-8">
         <div className="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-25"></div>
-        <div className="relative bg-white p-6 rounded-full shadow-lg border border-slate-100">
+        <div className="relative bg-white p-6 rounded-full shadow-lg border border-slate-200">
            <Loader2 className="w-12 h-12 text-emerald-600 animate-spin" />
         </div>
       </div>

@@ -80,7 +80,7 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
       
-      <div className="relative bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col animate-fade-in">
+      <div className="relative bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] border border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-fade-in">
         <div className="bg-slate-50 border-b border-slate-100 p-6 flex justify-between items-center">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">Review Your Week</h2>
@@ -112,7 +112,7 @@ const WeeklyReviewModal: React.FC<WeeklyReviewModalProps> = ({
                   const state = getFeedback(day.day, type, item.name);
 
                   return (
-                    <div key={type} className="border border-slate-100 rounded-xl p-4 bg-white shadow-sm hover:border-slate-300 transition-colors">
+                    <div key={type} className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm hover:border-slate-300 transition-colors">
                       <div className="text-xs font-semibold text-slate-400 uppercase mb-1">{type}</div>
                       <div className="font-medium text-slate-800 text-sm mb-4 line-clamp-2 h-10 leading-tight" title={item.name}>
                         {item.name}

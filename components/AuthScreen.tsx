@@ -65,7 +65,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
         <p className="text-slate-400 mt-2">AI-Powered Meal Planning Architecture</p>
       </div>
 
-      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-fade-in delay-100">
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 animate-fade-in delay-100">
         <div className="flex gap-4 mb-8 border-b border-slate-100">
           <button
             onClick={() => { setIsLogin(true); setError(''); setInfo(''); }}

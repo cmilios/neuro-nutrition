@@ -4,8 +4,12 @@ import {
   CheckCircle2,
   KeyRound,
   LogOut,
+  Monitor,
+  Moon,
+  Palette,
   RotateCcw,
   ShieldCheck,
+  Sun,
   UserRound,
   X,
 } from 'lucide-react';
@@ -16,8 +20,13 @@ import {
 } from '../services/passwordPolicy';
 import MilestoneTracker from './MilestoneTracker';
 import ProfileForm from './ProfileForm';
+import {
+  getThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from '../services/theme';
 
-type AccountSection = 'health' | 'security' | 'start-over';
+type AccountSection = 'health' | 'appearance' | 'security' | 'start-over';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -43,6 +52,7 @@ const sections: Array<{
   icon: React.ComponentType<{ size?: number }>;
 }> = [
   { id: 'health', label: 'Health Profile', icon: UserRound },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'security', label: 'Security', icon: ShieldCheck },
   { id: 'start-over', label: 'Start Over', icon: RotateCcw },
 ];
@@ -93,6 +103,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [startOverRunning, setStartOverRunning] = useState(false);
   const [startOverError, setStartOverError] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePreference>(getThemePreference);
   const dialogRef = useRef<HTMLDivElement>(null);
   const guardDialogRef = useRef<HTMLDivElement>(null);
   const firstTabRef = useRef<HTMLButtonElement>(null);
@@ -351,6 +362,37 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
     });
   };
 
+  const updateTheme = (preference: ThemePreference) => {
+    setTheme(preference);
+    setThemePreference(preference);
+  };
+
+  const themeOptions: Array<{
+    value: ThemePreference;
+    label: string;
+    description: string;
+    icon: React.ComponentType<{ size?: number }>;
+  }> = [
+    {
+      value: 'system',
+      label: 'System',
+      description: 'Match this device',
+      icon: Monitor,
+    },
+    {
+      value: 'light',
+      label: 'Light',
+      description: 'Always use light mode',
+      icon: Sun,
+    },
+    {
+      value: 'dark',
+      label: 'Dark',
+      description: 'Always use dark mode',
+      icon: Moon,
+    },
+  ];
+
   return (
     <div className="fixed inset-0 z-[100]">
       <button
@@ -365,7 +407,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="account-title"
-          className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[min(760px,92vh)] sm:rounded-3xl md:flex-row"
+          className="relative flex h-full w-full max-w-5xl flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl sm:h-[min(760px,92vh)] sm:rounded-3xl md:flex-row"
         >
           <button type="button" onClick={requestClose} aria-label="Close Account" className="absolute right-4 top-4 z-10 rounded-full p-2 text-slate-500 hover:bg-slate-100">
             <X size={22} />
@@ -579,6 +621,56 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   </div>
                 )}
 
+                {activeSection === 'appearance' && (
+                  <div className="max-w-2xl">
+                    <h3 className="mb-1 text-2xl font-black text-slate-950">Appearance</h3>
+                    <p className="mb-6 text-sm text-slate-500">
+                      Choose how NeuroNutrition looks on this device.
+                    </p>
+                    <fieldset>
+                      <legend className="mb-3 text-sm font-bold text-slate-800">Theme</legend>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {themeOptions.map((option) => {
+                          const Icon = option.icon;
+                          const selected = theme === option.value;
+                          return (
+                            <label
+                              key={option.value}
+                              className={`cursor-pointer rounded-2xl border p-4 ${
+                                selected
+                                  ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20'
+                                  : 'border-slate-200 bg-white hover:border-emerald-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name="theme"
+                                value={option.value}
+                                checked={selected}
+                                onChange={() => updateTheme(option.value)}
+                                className="sr-only"
+                              />
+                              <span className="flex items-center gap-3">
+                                <span className={`rounded-xl border p-2 ${
+                                  selected
+                                    ? 'border-emerald-300 bg-white text-emerald-700'
+                                    : 'border-slate-200 bg-slate-50 text-slate-500'
+                                }`}>
+                                  <Icon size={20} />
+                                </span>
+                                <span>
+                                  <span className="block text-sm font-bold text-slate-900">{option.label}</span>
+                                  <span className="mt-0.5 block text-xs text-slate-500">{option.description}</span>
+                                </span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  </div>
+                )}
+
                 {activeSection === 'start-over' && (
                   <div className="max-w-xl">
                     <h3 className="mb-1 text-2xl font-black text-slate-950">Start Over</h3>
@@ -631,7 +723,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
       {pendingExit && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/45 p-4">
-          <div ref={guardDialogRef} role="alertdialog" aria-modal="true" aria-labelledby="unsaved-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div ref={guardDialogRef} role="alertdialog" aria-modal="true" aria-labelledby="unsaved-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
             <AlertTriangle className="text-amber-600" />
             <h3 id="unsaved-title" className="mt-3 text-xl font-black text-slate-950">Discard unsaved Health Profile changes?</h3>
             <p className="mt-2 text-sm text-slate-600">Your edits have not been saved.</p>

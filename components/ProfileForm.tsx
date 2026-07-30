@@ -123,7 +123,7 @@ const ProfileForm: React.FC<ProfileFormProps> = ({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className={`${!isEditing ? 'bg-white shadow-xl shadow-slate-200/50 border border-slate-100 rounded-2xl' : ''} overflow-hidden`}>
+      <form onSubmit={handleSubmit} className={`${!isEditing ? 'bg-white shadow-xl shadow-slate-200/50 border border-slate-200 rounded-2xl' : ''} overflow-hidden`}>
         <div className={`space-y-8 ${!isEditing ? 'p-8' : ''}`}>
           
           {/* Health Sync Integration */}

@@ -89,21 +89,21 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ milestones,
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
             <div className="flex items-center gap-2 mb-2 text-slate-400 text-xs font-bold uppercase tracking-wide">
                 <WeightIcon /> Current Weight
             </div>
             <div className="text-2xl font-bold text-slate-900">{currentWeight} <span className="text-sm font-normal text-slate-500">kg</span></div>
         </div>
         
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
             <div className="flex items-center gap-2 mb-2 text-slate-400 text-xs font-bold uppercase tracking-wide">
                 <Target size={14} /> Goal
             </div>
             <div className="text-2xl font-bold text-slate-900">{targetWeight ? targetWeight : '--'} <span className="text-sm font-normal text-slate-500">kg</span></div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
             <div className="flex items-center gap-2 mb-2 text-slate-400 text-xs font-bold uppercase tracking-wide">
                 <Activity size={14} /> Total Change
             </div>
@@ -112,7 +112,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ milestones,
             </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
             <div className="flex items-center gap-2 mb-2 text-slate-400 text-xs font-bold uppercase tracking-wide">
                 <Activity size={14} /> BMI
             </div>
@@ -122,7 +122,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ milestones,
 
       {/* Progress Bar */}
       {targetWeight && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
            <div className="flex justify-between text-sm font-medium mb-2">
               <span className="text-slate-600">Progress to Goal</span>
               <span className="text-emerald-600">{progressPercent.toFixed(0)}%</span>
@@ -137,7 +137,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ milestones,
       )}
 
       {/* Chart */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-md shadow-slate-900/5">
          <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
             <TrendingUp size={18} className="text-emerald-600" /> Weight Trend
          </h3>

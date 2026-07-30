@@ -43,7 +43,7 @@ const MealDetailsModal: React.FC<MealDetailsModalProps> = ({
       ></div>
 
       {/* Modal Content */}
-      <div className="relative bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] shadow-2xl overflow-hidden flex flex-col animate-fade-in">
+      <div className="relative bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] border border-slate-200 shadow-2xl overflow-hidden flex flex-col animate-fade-in">
         
         {/* Header */}
         <div className="bg-slate-50 border-b border-slate-100 p-6 flex justify-between items-start shrink-0">
