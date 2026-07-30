@@ -36,6 +36,11 @@ import { weeklyPlanCache } from './services/weeklyPlanCache';
 import { requireAuthoritativeWeeklyPlanRow } from './services/weeklyPlanValidation';
 import { supabase } from './services/supabaseClient';
 import { reportClientIncident } from './services/clientIncidentTelemetry';
+import {
+  APPLICATION_BASE_PATH,
+  PASSWORD_RECOVERY_PATH,
+  passwordRecoveryUrl,
+} from './services/applicationRoutes';
 
 type PlanAuthorityStatus =
   | 'checking'
@@ -45,6 +50,8 @@ type PlanAuthorityStatus =
   | 'unavailable';
 
 const App: React.FC = () => {
+  const isPasswordRecoveryRoute =
+    window.location.pathname === PASSWORD_RECOVERY_PATH;
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
@@ -72,10 +79,14 @@ const App: React.FC = () => {
   } | null>(null);
   const recoveringRealtimeRef = React.useRef(false);
   const realtimeDisconnectedRef = React.useRef(false);
+  const recoveryEventReceivedRef = React.useRef(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [recoverySessionStatus, setRecoverySessionStatus] = useState<
+    'checking' | 'ready' | 'invalid'
+  >(isPasswordRecoveryRoute ? 'checking' : 'invalid');
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [planAuthorityStatus, setPlanAuthorityStatus] =
     useState<PlanAuthorityStatus>('checking');
@@ -215,7 +226,11 @@ const App: React.FC = () => {
       }
     };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (isPasswordRecoveryRoute && event === 'PASSWORD_RECOVERY') {
+        recoveryEventReceivedRef.current = true;
+        setRecoverySessionStatus(session ? 'ready' : 'invalid');
+      }
       applySession(session);
       setIsAuthChecking(false);
     });
@@ -230,7 +245,15 @@ const App: React.FC = () => {
         if (mounted) setError('Could not restore your session. Please log in again.');
       })
       .finally(() => {
-        if (mounted) setIsAuthChecking(false);
+        if (mounted) {
+          setIsAuthChecking(false);
+          if (
+            isPasswordRecoveryRoute
+            && !recoveryEventReceivedRef.current
+          ) {
+            setRecoverySessionStatus('invalid');
+          }
+        }
       });
 
     return () => {
@@ -979,11 +1002,33 @@ const App: React.FC = () => {
     });
   };
 
-  if (isAuthChecking) {
+  if (
+    isAuthChecking
+    || (isPasswordRecoveryRoute && recoverySessionStatus === 'checking')
+  ) {
     return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
   }
 
-  if (window.location.pathname === '/recover-password') {
+  if (isPasswordRecoveryRoute) {
+    if (recoverySessionStatus !== 'ready') {
+      return (
+        <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-red-100 bg-white p-8 shadow-xl">
+            <h1 className="text-2xl font-black text-slate-950">Recover password</h1>
+            <p role="alert" className="mt-4 text-sm text-red-700">
+              This password recovery link is invalid or has expired. Request a new
+              recovery email from Account Security.
+            </p>
+            <a
+              href={APPLICATION_BASE_PATH}
+              className="mt-4 inline-block text-sm font-bold text-emerald-700 underline"
+            >
+              Return to NeuroNutrition
+            </a>
+          </div>
+        </main>
+      );
+    }
     return (
       <PasswordRecoveryScreen
         onComplete={authService.completePasswordRecovery}
@@ -1136,7 +1181,7 @@ const App: React.FC = () => {
             onChangePassword={authService.changePassword}
             onSendRecovery={() => authService.sendPasswordRecovery(
               user.email,
-              `${window.location.origin}/recover-password`,
+              passwordRecoveryUrl(window.location.origin),
             )}
             onStartOver={handleStartOver}
             onLogout={handleLogout}

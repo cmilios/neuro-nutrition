@@ -4,6 +4,7 @@ import {
   passwordPolicyMessage,
   satisfiesPasswordPolicy,
 } from '../services/passwordPolicy';
+import { APPLICATION_BASE_PATH } from '../services/applicationRoutes';
 
 interface PasswordRecoveryScreenProps {
   onComplete: (newPassword: string) => Promise<void>;
@@ -54,7 +55,7 @@ const PasswordRecoveryScreen: React.FC<PasswordRecoveryScreenProps> = ({
         {complete ? (
           <div role="status">
             <p className="font-bold text-emerald-700">Your password has been updated.</p>
-            <a href="/" className="mt-4 inline-block text-sm font-bold text-emerald-700 underline">Return to NeuroNutrition</a>
+            <a href={APPLICATION_BASE_PATH} className="mt-4 inline-block text-sm font-bold text-emerald-700 underline">Return to NeuroNutrition</a>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">

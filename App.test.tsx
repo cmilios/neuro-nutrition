@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { weeklyPlanFixture } from "./test/weeklyPlanFixture";
@@ -43,6 +43,8 @@ const {
   logout,
   changePassword,
   sendPasswordRecovery,
+  completePasswordRecovery,
+  authStateChangeCallbacks,
 } = vi.hoisted(() => ({
   edgeFunctionInvoke: vi.fn(),
   getProfileData: vi.fn(),
@@ -56,6 +58,8 @@ const {
   logout: vi.fn(),
   changePassword: vi.fn(),
   sendPasswordRecovery: vi.fn(),
+  completePasswordRecovery: vi.fn(),
+  authStateChangeCallbacks: [] as Array<(event: string, session: unknown) => void>,
 }));
 
 vi.mock("./services/supabaseClient", () => ({
@@ -69,7 +73,10 @@ vi.mock("./services/supabaseClient", () => ({
         },
         error: null,
       }),
-      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+      onAuthStateChange: vi.fn((callback) => {
+        authStateChangeCallbacks.push(callback);
+        return { data: { subscription: { unsubscribe: vi.fn() } } };
+      }),
     },
     functions: { invoke: edgeFunctionInvoke },
   },
@@ -101,7 +108,7 @@ vi.mock("./services/authService", () => ({
     logout,
     changePassword,
     sendPasswordRecovery,
-    completePasswordRecovery: vi.fn(),
+    completePasswordRecovery,
   },
 }));
 
@@ -109,6 +116,8 @@ import App from "./App";
 
 describe("application generation flow", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/neuro-nutrition/");
+    authStateChangeCallbacks.length = 0;
     edgeFunctionInvoke.mockReset();
     getProfileData.mockReset().mockResolvedValue(null);
     saveProfileData.mockReset().mockResolvedValue(undefined);
@@ -202,6 +211,7 @@ describe("application generation flow", () => {
     logout.mockReset().mockResolvedValue(undefined);
     changePassword.mockReset().mockResolvedValue(undefined);
     sendPasswordRecovery.mockReset().mockResolvedValue(undefined);
+    completePasswordRecovery.mockReset().mockResolvedValue(undefined);
   });
 
   it("generates and renders the returned Weekly Plan", async () => {
@@ -717,6 +727,102 @@ describe("application generation flow", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Multi-factor verification is required before you can change your password.",
     );
+  });
+
+  it("requests password recovery with the deployed repository-scoped callback", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+    await user.click(screen.getByRole("button", { name: "Send recovery email" }));
+
+    await waitFor(() => expect(sendPasswordRecovery).toHaveBeenCalledWith(
+      "alex@example.com",
+      "http://localhost:3000/neuro-nutrition/recover-password",
+    ));
+    expect(screen.getByRole("dialog", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByText("Welcome back, Alex")).toBeInTheDocument();
+  });
+
+  it("preserves the current session and hides provider details when recovery fails", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    sendPasswordRecovery.mockRejectedValue(Object.assign(
+      new Error("alex@example.com is not registered"),
+      { code: "user_not_found" },
+    ));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+    await user.click(screen.getByRole("button", { name: "Send recovery email" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Recovery email could not be sent. Please try again.",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent("alex@example.com is not registered");
+    expect(screen.getByRole("dialog", { name: "Account" })).toBeInTheDocument();
+    expect(screen.getByText("Welcome back, Alex")).toBeInTheDocument();
+  });
+
+  it("completes password recovery only after the recovery callback is recognized", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/neuro-nutrition/recover-password#access_token=redacted&type=recovery",
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+    await act(async () => {
+      authStateChangeCallbacks[0]("PASSWORD_RECOVERY", {
+        user: { id: "user-1", email: "alex@example.com", user_metadata: { name: "Alex" } },
+      });
+    });
+
+    expect(await screen.findByRole("heading", { name: "Recover password" }))
+      .toBeInTheDocument();
+    await user.type(screen.getByLabelText("New password"), "recovered-secret3");
+    await user.type(screen.getByLabelText("Confirm new password"), "recovered-secret3");
+    await user.click(screen.getByRole("button", { name: "Update password" }));
+
+    expect(completePasswordRecovery).toHaveBeenCalledWith("recovered-secret3");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Your password has been updated.",
+    );
+  });
+
+  it("rejects a recovery route without a recovery-derived session", async () => {
+    window.history.replaceState({}, "", "/neuro-nutrition/recover-password");
+
+    render(<App />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This password recovery link is invalid or has expired.",
+    );
+    expect(screen.queryByLabelText("New password")).not.toBeInTheDocument();
   });
 
   it("saves corrected Health Profile data before safely replacing the Current Weekly Plan", async () => {

@@ -57,6 +57,19 @@ describe("authenticated security operations", () => {
     });
   });
 
+  it("preserves structured recovery request errors for safe UI handling", async () => {
+    const authError = Object.assign(new Error("provider detail"), {
+      code: "over_email_send_rate_limit",
+      status: 429,
+    });
+    resetPasswordForEmail.mockResolvedValue({ data: null, error: authError });
+
+    await expect(authService.sendPasswordRecovery(
+      "alex@example.com",
+      "https://app.example.com/recover-password",
+    )).rejects.toBe(authError);
+  });
+
   it("completes recovery without retaining or resending a current password", async () => {
     updateUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
 

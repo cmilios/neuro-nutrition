@@ -310,11 +310,19 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
         message: `Recovery email sent to ${email}. Your current session remains active.`,
       });
     } catch (error) {
+      const code = (error as { code?: string })?.code;
+      const messagesByCode: Record<string, string> = {
+        over_email_send_rate_limit:
+          'Too many recovery emails were requested. Wait a moment, then try again.',
+        request_timeout:
+          'The recovery request timed out. Please try again.',
+        unexpected_failure:
+          'The recovery service is temporarily unavailable. Please try again.',
+      };
       setSecurityStatus({
         kind: 'error',
-        message: error instanceof Error
-          ? error.message
-          : 'Recovery email could not be sent. Please try again.',
+        message: messagesByCode[code ?? '']
+          ?? 'Recovery email could not be sent. Please try again.',
       });
     } finally {
       setRecoverySending(false);
