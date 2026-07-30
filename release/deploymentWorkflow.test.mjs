@@ -16,7 +16,7 @@ describe("GitHub Pages deployment workflow", () => {
 });
 
 describe("scheduled Weekly Plan observation workflow", () => {
-  it("runs on schedule only after observation infrastructure is explicitly enabled", async () => {
+  it("runs only after observation infrastructure is explicitly enabled", async () => {
     const workflow = (
       await readFile(
         new URL("../.github/workflows/observe-weekly-plan.yml", import.meta.url),
@@ -25,8 +25,9 @@ describe("scheduled Weekly Plan observation workflow", () => {
     ).replaceAll("\r\n", "\n");
 
     expect(workflow).toContain(
-      "github.event_name == 'workflow_dispatch' ||\n"
-      + "      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'true'",
+      "vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'true' ||\n"
+      + "      (github.event_name == 'workflow_dispatch' &&\n"
+      + "      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'manual')",
     );
   });
 });

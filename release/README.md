@@ -36,12 +36,16 @@ continuous failed GitHub Actions runs. Before enabling it:
 3. Configure their `OBSERVATION_*_URL` and least-privilege
    `OBSERVATION_*_TOKEN` repository secrets. `OBSERVATION_ALERT_URL` is
    optional.
-4. Run `Observe authoritative Weekly Plan` manually and confirm it passes.
-5. Set the repository Actions variable `WEEKLY_PLAN_OBSERVATION_ENABLED` to
-   `true`.
+4. Set the repository Actions variable `WEEKLY_PLAN_OBSERVATION_ENABLED` to
+   `manual`, run `Observe authoritative Weekly Plan` manually, and confirm it
+   passes.
+5. Change `WEEKLY_PLAN_OBSERVATION_ENABLED` to `true` to start the schedule.
 
-Removing that variable, or changing it to any other value, pauses scheduled
-observation without weakening the monitor's fail-closed behavior when it runs.
+Removing that variable, or changing it to any other value, skips both scheduled
+and manually dispatched observation. `manual` permits only dispatched
+validation; `true` permits both dispatched and scheduled observation. This
+keeps an unprovisioned monitor quiet without weakening its fail-closed behavior
+when it is deliberately enabled.
 
 After at least 24 hours, assemble every timestamped monitor artifact into the
 input and create the immutable final report with `npm.cmd run

@@ -11,8 +11,9 @@ permissions:
 jobs:
   observe:
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'true'
+      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'true' ||
+      (github.event_name == 'workflow_dispatch' &&
+      vars.WEEKLY_PLAN_OBSERVATION_ENABLED == 'manual')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
