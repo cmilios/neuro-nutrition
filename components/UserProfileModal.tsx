@@ -391,7 +391,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     onClick={() => changeSection(section.id)}
                     onKeyDown={(event) => handleTabKeyDown(event, index)}
                     className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold md:w-full ${
-                      selected ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/70'
+                      selected ? 'bg-white text-slate-950 shadow-sm ring-1 ring-inset ring-slate-200' : 'text-slate-600 hover:bg-white/70'
                     }`}
                   >
                     <Icon size={17} />
