@@ -115,3 +115,15 @@ Before releasing the Account experience:
   stale recovery, and authoritative replacement sync in the deployed
   environment. Local configuration and automated tests do not prove hosted
   Auth settings are active.
+
+### Production Auth verification — 2026-07-30
+
+Verified in the hosted Supabase dashboard for project `cmayisxvronrwvzhyuer`:
+
+- Current-password enforcement is enabled for authenticated password changes.
+- The minimum password length is eight characters.
+- Passwords require at least one letter and one digit.
+- Age-based emailed reauthentication ("Secure password change") remains
+  disabled for this release.
+- Leaked-password rejection remains disabled because the project is on the
+  Free plan; Supabase exposes this control only on Pro and above.
