@@ -24,4 +24,8 @@ If they do not exist, proceed silently. Domain-modeling workflows create them wh
 
 Use terminology defined in `CONTEXT.md`. Avoid introducing synonyms that conflict with its glossary.
 
+If a needed concept is absent, reconsider whether it reflects the project’s language or note it for domain modeling.
+
+## ADR conflicts
+
 If a change contradicts an existing ADR, surface the conflict explicitly instead of silently overriding the decision.
