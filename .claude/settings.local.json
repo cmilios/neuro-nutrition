@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "mcp__mcp-registry__search_mcp_registry"
+      "Bash(gh repo *)",
+      "Bash(gh api *)",
+      "Bash(claude plugins *)",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(d['name']\\) for d in data]\")",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(t['path']\\) for t in data['tree'] if t['path'].endswith\\('SKILL.md'\\)]\")",
+      "Bash(ls \"C:\\\\Users\\\\christos.milios\\\\.claude\\\\\" 2>&1)",
+      "Bash(python -c ' *)",
+      "Bash(npx skills@latest add --help)",
+      "Bash(npx skills@latest --help)",
+      "Bash(npx skills@latest add mattpocock/skills --all -g)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
