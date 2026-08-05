@@ -9,5 +9,12 @@ export const PASSWORD_RECOVERY_PATH =
 export const OAUTH_VERIFICATION_PATH =
   `${APPLICATION_BASE_PATH}verify-oauth`;
 
+// Fixed production return URL for the hosted OAuth redirect. The provider
+// redirects the browser back here after authentication, so it must be the
+// canonical deployed origin regardless of the environment the flow started in
+// (a preview or local origin is not on the provider's allow-list). See
+// docs/oauth/verification-matrix.md (case M1) and issue #60.
+export const OAUTH_REDIRECT_URL = 'https://cmilios.github.io/neuro-nutrition/';
+
 export const passwordRecoveryUrl = (origin: string) =>
   new URL(PASSWORD_RECOVERY_PATH, origin).toString();
