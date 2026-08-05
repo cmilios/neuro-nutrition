@@ -727,6 +727,10 @@ describe("application generation flow", () => {
     getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
     const cacheKey = "neuronutrition_current_weekly_plan_user-1";
     sessionStorage.setItem(cacheKey, "cached user data");
+    logout.mockImplementation(async () => {
+      authStateChangeCallbacks[0]("SIGNED_OUT", null);
+      expect(sessionStorage.getItem(cacheKey)).toBeNull();
+    });
     const user = userEvent.setup();
     render(<App />);
 

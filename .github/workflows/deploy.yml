@@ -39,6 +39,10 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_CLIENT_INCIDENT_ALERT_URL: ${{ secrets.VITE_CLIENT_INCIDENT_ALERT_URL }}
           VITE_RELEASE_ID: ${{ github.sha }}
+          # Repository variables control the independent OAuth rollout gates.
+          # Missing or invalid values fail closed to `off` in the application.
+          VITE_OAUTH_GOOGLE_MODE: ${{ vars.VITE_OAUTH_GOOGLE_MODE || 'off' }}
+          VITE_OAUTH_APPLE_MODE: ${{ vars.VITE_OAUTH_APPLE_MODE || 'off' }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

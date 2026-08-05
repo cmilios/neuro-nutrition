@@ -87,6 +87,7 @@ const App: React.FC = () => {
 
   // Track the currently loaded user ID to avoid stale closures in effects
   const loadedUserIdRef = React.useRef<string | null>(null);
+  const authenticatedUserIdRef = React.useRef<string | null>(null);
   const initialGenerationCommandRef = React.useRef<{
     commandId: string;
     normalizedProfile: string;
@@ -320,13 +321,17 @@ const App: React.FC = () => {
 
       const nextUser = invalidOAuthEmail ? null : userFromSession(session);
       if (nextUser) {
+        authenticatedUserIdRef.current = nextUser.id;
         rejectedOAuthUserIdRef.current = null;
         clearPendingOAuth();
         setAuthenticationError(null);
       }
-      setUser(nextUser);
 
       if (!nextUser) {
+        if (authenticatedUserIdRef.current) {
+          weeklyPlanCache.clear(authenticatedUserIdRef.current);
+        }
+        authenticatedUserIdRef.current = null;
         loadedUserIdRef.current = null;
         authoritativePlanRef.current = null;
         setAuthoritativePlan(null);
@@ -344,6 +349,7 @@ const App: React.FC = () => {
         reconcilingNextGenerationIdRef.current = null;
         setPlanAuthorityStatus('checking');
       }
+      setUser(nextUser);
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -697,14 +703,15 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    const loggingOutUserId = user?.id ?? null;
     try {
       await authService.logout();
-      if (user) weeklyPlanCache.clear(user.id);
+      if (loggingOutUserId) weeklyPlanCache.clear(loggingOutUserId);
       clearPendingOAuth();
+      authenticatedUserIdRef.current = null;
       loadedUserIdRef.current = null;
       authoritativePlanRef.current = null;
       setAuthoritativePlan(null);
-      setUser(null);
       setProfile(null);
       setMealPlan(null);
       setMilestones([]);
@@ -718,6 +725,7 @@ const App: React.FC = () => {
       startOverCommandRef.current = null;
       reconcilingNextGenerationIdRef.current = null;
       setPlanAuthorityStatus('checking');
+      setUser(null);
     } catch (logoutError) {
       console.error('Failed to log out:', logoutError);
       throw new Error('Could not log out. Please try again.');
