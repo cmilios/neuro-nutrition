@@ -25,6 +25,11 @@ import {
   setThemePreference,
   type ThemePreference,
 } from '../services/theme';
+import type { ConnectedSignInMethod } from '../services/authService';
+import {
+  getProviderMode,
+  type OAuthProvider,
+} from '../services/oauthProviderFlagsService';
 
 type AccountSection = 'health' | 'appearance' | 'security' | 'start-over';
 
@@ -41,6 +46,9 @@ interface UserProfileModalProps {
   onAddMilestone: (weight: number, note: string, bodyFat?: number) => void;
   onDeleteMilestone: (id: string) => void;
   onChangePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  onSetPassword: (newPassword: string) => Promise<ConnectedSignInMethod[]>;
+  onGetConnectedSignInMethods: () => Promise<ConnectedSignInMethod[]>;
+  onDisconnectSignInMethod: (identityId: string) => Promise<void>;
   onSendRecovery: () => Promise<void>;
   onStartOver: () => Promise<void>;
   onLogout: () => Promise<void>;
@@ -60,6 +68,19 @@ const sections: Array<{
 const focusableSelector =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
+const providerNames: Record<string, string> = {
+  apple: 'Apple',
+  email: 'Email/password',
+  google: 'Google',
+};
+
+const getProviderName = (provider: string): string =>
+  providerNames[provider]
+  ?? provider.charAt(0).toUpperCase() + provider.slice(1);
+
+const isOAuthProvider = (provider: string): provider is OAuthProvider =>
+  provider === 'google' || provider === 'apple';
+
 const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
   onClose,
@@ -73,6 +94,9 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onAddMilestone,
   onDeleteMilestone,
   onChangePassword,
+  onSetPassword,
+  onGetConnectedSignInMethods,
+  onDisconnectSignInMethod,
   onSendRecovery,
   onStartOver,
   onLogout,
@@ -98,6 +122,12 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
     message: string;
   } | null>(null);
   const [securitySaving, setSecuritySaving] = useState(false);
+  const [connectedMethods, setConnectedMethods] = useState<ConnectedSignInMethod[]>([]);
+  const [connectedMethodsLoading, setConnectedMethodsLoading] = useState(false);
+  const [connectedMethodsLoaded, setConnectedMethodsLoaded] = useState(false);
+  const [connectedMethodsError, setConnectedMethodsError] = useState<string | null>(null);
+  const [connectedMethodsReloadKey, setConnectedMethodsReloadKey] = useState(0);
+  const [disconnectingIdentityId, setDisconnectingIdentityId] = useState<string | null>(null);
   const [recoverySending, setRecoverySending] = useState(false);
   const [startOverConfirming, setStartOverConfirming] = useState(false);
   const [startOverRunning, setStartOverRunning] = useState(false);
@@ -112,6 +142,8 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const confirmationRef = useRef<HTMLInputElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const healthDirtyRef = useRef(false);
+  const hasPasswordIdentity = connectedMethodsError !== null
+    || connectedMethods.some((method) => method.provider === 'email');
 
   const clearPasswordDraft = () => {
     setCurrentPassword('');
@@ -193,6 +225,32 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || activeSection !== 'security') return;
+    let cancelled = false;
+    setConnectedMethodsLoading(true);
+    setConnectedMethodsLoaded(false);
+    setConnectedMethodsError(null);
+    void onGetConnectedSignInMethods()
+      .then((methods) => {
+        if (!cancelled) setConnectedMethods(methods);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setConnectedMethodsError('Connected sign-in methods could not be loaded. Please try again.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setConnectedMethodsLoading(false);
+          setConnectedMethodsLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection, connectedMethodsReloadKey, isOpen, onGetConnectedSignInMethods]);
+
   if (!isOpen) return null;
 
   const handleTabKeyDown = (event: React.KeyboardEvent, index: number) => {
@@ -246,8 +304,10 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const submitPassword = async (event: React.FormEvent) => {
     event.preventDefault();
     const errors: Record<string, string> = {};
-    if (!currentPassword) errors.current = 'Enter your current password.';
-    if (newPassword === currentPassword && newPassword) errors.new = 'Choose a different password.';
+    if (hasPasswordIdentity && !currentPassword) errors.current = 'Enter your current password.';
+    if (hasPasswordIdentity && newPassword === currentPassword && newPassword) {
+      errors.new = 'Choose a different password.';
+    }
     if (!satisfiesPasswordPolicy(newPassword)) {
       errors.new = passwordPolicyMessage;
     }
@@ -265,11 +325,17 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
     setSecuritySaving(true);
     try {
-      await onChangePassword(currentPassword, newPassword);
+      if (hasPasswordIdentity) {
+        await onChangePassword(currentPassword, newPassword);
+      } else {
+        setConnectedMethods(await onSetPassword(newPassword));
+      }
       clearPasswordDraft();
       setSecurityStatus({
         kind: 'success',
-        message: 'Password changed. Other sessions were signed out.',
+        message: hasPasswordIdentity
+          ? 'Password changed. Other sessions were signed out.'
+          : 'Password set. Your session remains active.',
       });
     } catch (error) {
       const code = (error as { code?: string })?.code;
@@ -308,6 +374,34 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
       }
     } finally {
       setSecuritySaving(false);
+    }
+  };
+
+  const disconnectMethod = async (method: ConnectedSignInMethod) => {
+    if (connectedMethods.length === 1 && !hasPasswordIdentity) {
+      setSecurityStatus({
+        kind: 'error',
+        message: 'Add a password or another sign-in method before disconnecting your only sign-in method.',
+      });
+      return;
+    }
+
+    setDisconnectingIdentityId(method.identityId);
+    setSecurityStatus(null);
+    try {
+      await onDisconnectSignInMethod(method.identityId);
+      setConnectedMethods(await onGetConnectedSignInMethods());
+      setSecurityStatus({
+        kind: 'success',
+        message: `${getProviderName(method.provider)} disconnected.`,
+      });
+    } catch {
+      setSecurityStatus({
+        kind: 'error',
+        message: 'The sign-in method could not be disconnected. Please try again.',
+      });
+    } finally {
+      setDisconnectingIdentityId(null);
     }
   };
 
@@ -550,21 +644,74 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Email</p>
                       <p className="mt-1 text-sm font-semibold text-slate-800">{email}</p>
                     </div>
+                    <section aria-labelledby="connected-methods-title" className="mb-8">
+                      <h4 id="connected-methods-title" className="font-bold text-slate-900">
+                        Connected sign-in methods
+                      </h4>
+                      {connectedMethodsLoading ? (
+                        <p className="mt-2 text-sm text-slate-500">Loading connected methods…</p>
+                      ) : connectedMethodsError ? (
+                        <div className="mt-2">
+                          <p role="alert" className="text-sm text-red-700">{connectedMethodsError}</p>
+                          <button
+                            type="button"
+                            onClick={() => setConnectedMethodsReloadKey((key) => key + 1)}
+                            className="mt-2 text-sm font-bold text-emerald-700"
+                          >
+                            Retry connected methods
+                          </button>
+                        </div>
+                      ) : (
+                        <ul aria-label="Connected sign-in methods" className="mt-3 space-y-2">
+                          {connectedMethods.map((method) => {
+                            const providerUnavailable =
+                              isOAuthProvider(method.provider)
+                              && getProviderMode(method.provider) === 'off';
+                            return (
+                              <li key={method.identityId} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-3">
+                                <span>
+                                  <span className="block text-sm font-semibold text-slate-800">
+                                    {getProviderName(method.provider)}
+                                  </span>
+                                  {providerUnavailable && (
+                                    <span className="mt-0.5 block text-xs font-semibold text-amber-700">
+                                      Sign-in temporarily unavailable
+                                    </span>
+                                  )}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Disconnect ${getProviderName(method.provider)}`}
+                                  disabled={disconnectingIdentityId !== null}
+                                  onClick={() => void disconnectMethod(method)}
+                                  className="text-sm font-bold text-red-700"
+                                >
+                                  {disconnectingIdentityId === method.identityId ? 'Disconnecting…' : 'Disconnect'}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </section>
+                    {connectedMethodsLoaded && (
                     <form onSubmit={submitPassword} className="space-y-4">
-                      <label className="block text-sm font-semibold text-slate-700">
-                        Current password
-                        <input
-                          ref={currentPasswordRef}
-                          type="password"
-                          autoComplete="current-password"
-                          value={currentPassword}
-                          onChange={(event) => setCurrentPassword(event.target.value)}
-                          aria-invalid={!!securityErrors.current}
-                          aria-describedby={securityErrors.current ? 'current-password-error' : undefined}
-                          className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
-                        />
-                        {securityErrors.current && <span id="current-password-error" className="mt-1 block text-xs text-red-700">{securityErrors.current}</span>}
-                      </label>
+                      {hasPasswordIdentity && (
+                        <label className="block text-sm font-semibold text-slate-700">
+                          Current password
+                          <input
+                            ref={currentPasswordRef}
+                            type="password"
+                            autoComplete="current-password"
+                            value={currentPassword}
+                            onChange={(event) => setCurrentPassword(event.target.value)}
+                            aria-invalid={!!securityErrors.current}
+                            aria-describedby={securityErrors.current ? 'current-password-error' : undefined}
+                            className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
+                          />
+                          {securityErrors.current && <span id="current-password-error" className="mt-1 block text-xs text-red-700">{securityErrors.current}</span>}
+                        </label>
+                      )}
                       <label className="block text-sm font-semibold text-slate-700">
                         New password
                         <input
@@ -596,9 +743,16 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         {securityErrors.confirmation && <span id="password-confirmation-error" className="mt-1 block text-xs text-red-700">{securityErrors.confirmation}</span>}
                       </label>
                       <button type="submit" disabled={securitySaving} className="flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-bold text-white disabled:opacity-60">
-                        <KeyRound size={17} /> {securitySaving ? 'Changing password…' : 'Change password'}
+                        <KeyRound size={17} /> {securitySaving
+                          ? hasPasswordIdentity
+                            ? 'Changing password…'
+                            : 'Setting password…'
+                          : hasPasswordIdentity
+                            ? 'Change password'
+                            : 'Set password'}
                       </button>
                     </form>
+                    )}
                     {securityStatus && (
                       <p
                         role={securityStatus.kind === 'error' ? 'alert' : 'status'}

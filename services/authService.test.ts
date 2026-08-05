@@ -1,17 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { updateUser, resetPasswordForEmail, signInWithOAuth } = vi.hoisted(() => ({
+const { getUser, updateUser, resetPasswordForEmail, signInWithOAuth, signOut, unlinkIdentity } = vi.hoisted(() => ({
+  getUser: vi.fn(),
   updateUser: vi.fn(),
   resetPasswordForEmail: vi.fn(),
   signInWithOAuth: vi.fn(),
+  signOut: vi.fn(),
+  unlinkIdentity: vi.fn(),
 }));
 
 vi.mock("./supabaseClient", () => ({
   supabase: {
     auth: {
+      getUser,
       updateUser,
       resetPasswordForEmail,
       signInWithOAuth,
+      signOut,
+      unlinkIdentity,
     },
   },
 }));
@@ -21,9 +27,32 @@ import { OAUTH_REDIRECT_URL } from "./applicationRoutes";
 
 describe("authenticated security operations", () => {
   beforeEach(() => {
+    getUser.mockReset();
     updateUser.mockReset();
     resetPasswordForEmail.mockReset();
     signInWithOAuth.mockReset();
+    signOut.mockReset();
+    unlinkIdentity.mockReset();
+  });
+
+  it("lists connected sign-in methods from the authenticated user's identities", async () => {
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          identities: [
+            { id: "legacy-google", identity_id: "google-1", provider: "google" },
+            { id: "legacy-email", identity_id: "email-1", provider: "email" },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    await expect(authService.getConnectedSignInMethods()).resolves.toEqual([
+      { identityId: "google-1", provider: "google" },
+      { identityId: "email-1", provider: "email" },
+    ]);
+    expect(getUser).toHaveBeenCalledOnce();
   });
 
   it("sends the current and new password through the authenticated update contract", async () => {
@@ -35,6 +64,53 @@ describe("authenticated security operations", () => {
       password: "new-secret2",
       current_password: "old-secret1",
     });
+  });
+
+  it("sets a first password without requiring the current password or ending the session", async () => {
+    updateUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "user-1",
+          identities: [
+            { id: "legacy-google", identity_id: "google-1", provider: "google" },
+            { id: "legacy-email", identity_id: "email-1", provider: "email" },
+          ],
+        },
+      },
+      error: null,
+    });
+
+    await expect(authService.setPassword("new-secret2")).resolves.toEqual([
+      { identityId: "google-1", provider: "google" },
+      { identityId: "email-1", provider: "email" },
+    ]);
+
+    expect(updateUser).toHaveBeenCalledWith({ password: "new-secret2" });
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("disconnects the selected identity returned by the authenticated user lookup", async () => {
+    const googleIdentity = {
+      id: "legacy-google",
+      identity_id: "google-1",
+      provider: "google",
+    };
+    getUser.mockResolvedValue({
+      data: {
+        user: {
+          identities: [
+            googleIdentity,
+            { id: "legacy-email", identity_id: "email-1", provider: "email" },
+          ],
+        },
+      },
+      error: null,
+    });
+    unlinkIdentity.mockResolvedValue({ data: {}, error: null });
+
+    await authService.disconnectSignInMethod("google-1");
+
+    expect(unlinkIdentity).toHaveBeenCalledWith(googleIdentity);
   });
 
   it("preserves structured Auth errors for field-specific handling", async () => {

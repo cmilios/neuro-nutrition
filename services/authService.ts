@@ -2,8 +2,46 @@ import { User } from '../types';
 import { supabase } from './supabaseClient';
 import { OAUTH_REDIRECT_URL } from './applicationRoutes';
 import type { OAuthProvider } from './oauthProviderFlagsService';
+import type { UserIdentity } from '@supabase/supabase-js';
+
+export interface ConnectedSignInMethod {
+  identityId: string;
+  provider: string;
+}
+
+const toConnectedSignInMethods = (
+  identities: UserIdentity[] | undefined,
+): ConnectedSignInMethod[] => (identities ?? []).map((identity) => ({
+  identityId: identity.identity_id,
+  provider: identity.provider,
+}));
+
+const getAuthenticatedUser = async () => {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  if (!data.user) throw new Error('Authenticated user was not found.');
+  return data.user;
+};
 
 export const authService = {
+  getConnectedSignInMethods: async (): Promise<ConnectedSignInMethod[]> => {
+    const user = await getAuthenticatedUser();
+    return toConnectedSignInMethods(user.identities);
+  },
+
+  disconnectSignInMethod: async (identityId: string): Promise<void> => {
+    const user = await getAuthenticatedUser();
+    const identity = user.identities?.find(
+      (candidate) => candidate.identity_id === identityId,
+    );
+    if (!identity) {
+      throw new Error('Connected sign-in method was not found.');
+    }
+
+    const { error: unlinkError } = await supabase.auth.unlinkIdentity(identity);
+    if (unlinkError) throw unlinkError;
+  },
+
   // Starts Supabase's hosted browser OAuth flow. On success this navigates the
   // whole page away to the provider, so control does not return; the caller
   // renders the "Signing you in…" interstitial while the redirect is pending.
@@ -91,6 +129,14 @@ export const authService = {
     });
     if (error) throw error;
     return data.user;
+  },
+
+  setPassword: async (newPassword: string) => {
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+    return toConnectedSignInMethods(data.user?.identities);
   },
 
   sendPasswordRecovery: async (email: string, redirectTo: string) => {

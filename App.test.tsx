@@ -42,6 +42,9 @@ const {
   startOver,
   logout,
   changePassword,
+  setPassword,
+  getConnectedSignInMethods,
+  disconnectSignInMethod,
   sendPasswordRecovery,
   completePasswordRecovery,
   authStateChangeCallbacks,
@@ -57,6 +60,9 @@ const {
   startOver: vi.fn(),
   logout: vi.fn(),
   changePassword: vi.fn(),
+  setPassword: vi.fn(),
+  getConnectedSignInMethods: vi.fn(),
+  disconnectSignInMethod: vi.fn(),
   sendPasswordRecovery: vi.fn(),
   completePasswordRecovery: vi.fn(),
   authStateChangeCallbacks: [] as Array<(event: string, session: unknown) => void>,
@@ -107,6 +113,9 @@ vi.mock("./services/authService", () => ({
   authService: {
     logout,
     changePassword,
+    setPassword,
+    getConnectedSignInMethods,
+    disconnectSignInMethod,
     sendPasswordRecovery,
     completePasswordRecovery,
   },
@@ -210,6 +219,13 @@ describe("application generation flow", () => {
     }));
     logout.mockReset().mockResolvedValue(undefined);
     changePassword.mockReset().mockResolvedValue(undefined);
+    setPassword.mockReset().mockResolvedValue([
+      { identityId: "email-1", provider: "email" },
+    ]);
+    getConnectedSignInMethods.mockReset().mockResolvedValue([
+      { identityId: "email-1", provider: "email" },
+    ]);
+    disconnectSignInMethod.mockReset().mockResolvedValue(undefined);
     sendPasswordRecovery.mockReset().mockResolvedValue(undefined);
     completePasswordRecovery.mockReset().mockResolvedValue(undefined);
   });

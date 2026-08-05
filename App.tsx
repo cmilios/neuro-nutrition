@@ -1306,6 +1306,9 @@ const App: React.FC = () => {
             onAddMilestone={handleAddMilestone}
             onDeleteMilestone={handleDeleteMilestone}
             onChangePassword={authService.changePassword}
+            onSetPassword={authService.setPassword}
+            onGetConnectedSignInMethods={authService.getConnectedSignInMethods}
+            onDisconnectSignInMethod={authService.disconnectSignInMethod}
             onSendRecovery={() => authService.sendPasswordRecovery(
               user.email,
               passwordRecoveryUrl(window.location.origin),
