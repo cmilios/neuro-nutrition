@@ -7,6 +7,7 @@ describe("client incident telemetry", () => {
     const report = createClientIncidentReporter({ rpc } as never);
 
     await report("authoritative_load_failure", {
+      provider: "google",
       phase: "initial_load",
       operation: "load",
       authorityStatus: "checking",
@@ -17,6 +18,7 @@ describe("client incident telemetry", () => {
     expect(rpc).toHaveBeenCalledWith("record_weekly_plan_client_incident", {
       p_event_type: "authoritative_load_failure",
       p_context: {
+        provider: "google",
         phase: "initial_load",
         operation: "load",
         authorityStatus: "checking",

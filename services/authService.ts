@@ -108,6 +108,19 @@ export const authService = {
     return data.user;
   },
 
+  updateDisplayName: async (name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      throw new Error('Display Name is required');
+    }
+
+    const { data, error } = await supabase.auth.updateUser({
+      data: { name: trimmedName },
+    });
+    if (error) throw error;
+    return data.user;
+  },
+
   // This is kept for compatibility but synchronous checks are less reliable with async auth.
   // We will primarily use the onAuthStateChange listener in App.tsx.
   getCurrentUser: (): User | null => {

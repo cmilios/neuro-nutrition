@@ -144,10 +144,10 @@ describe("AuthScreen provider rail", () => {
     render(<AuthScreen onSuccess={vi.fn()} onProviderSignIn={onProviderSignIn} />);
 
     await userEvent.click(googleButton() as HTMLElement);
-    expect(onProviderSignIn).toHaveBeenCalledWith("google");
+    expect(onProviderSignIn).toHaveBeenCalledWith("google", "login");
 
     await userEvent.click(appleButton() as HTMLElement);
-    expect(onProviderSignIn).toHaveBeenLastCalledWith("apple");
+    expect(onProviderSignIn).toHaveBeenLastCalledWith("apple", "login");
   });
 
   // P1 — the email/password login path is unchanged by the provider additions.
@@ -196,6 +196,29 @@ describe("AuthScreen provider rail", () => {
       email: "sam@example.com",
       name: "Sam",
     });
+  });
+
+  it("still keeps an unverified registration logged out pending email confirmation", async () => {
+    setModes({ google: "on", apple: "on" });
+    register.mockResolvedValue({
+      user: { id: "user-2", email: "sam@example.com", name: "Sam" },
+      needsEmailConfirmation: true,
+    });
+    const onSuccess = vi.fn();
+    render(<AuthScreen onSuccess={onSuccess} onProviderSignIn={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+    await userEvent.type(screen.getByPlaceholderText(/john doe/i), "Sam");
+    await userEvent.type(screen.getByPlaceholderText(/you@example.com/i), "sam@example.com");
+    await userEvent.type(screen.getByPlaceholderText("••••••••"), "secret-password2");
+    const submitAccount = screen
+      .getAllByRole("button", { name: /create account/i })
+      .find((button) => button.getAttribute("type") === "submit");
+    await userEvent.click(submitAccount as HTMLElement);
+
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(await screen.findByText(/sent a confirmation link/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeInTheDocument();
   });
 
   // G5 — email/password remains available regardless of provider mode.

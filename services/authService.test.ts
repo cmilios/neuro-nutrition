@@ -82,6 +82,24 @@ describe("authenticated security operations", () => {
     expect(updateUser).toHaveBeenCalledWith({ password: "recovered-secret3" });
   });
 
+  it("persists a trimmed canonical Display Name", async () => {
+    updateUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+
+    await authService.updateDisplayName("  Alex Rivera  ");
+
+    expect(updateUser).toHaveBeenCalledWith({
+      data: { name: "Alex Rivera" },
+    });
+  });
+
+  it("preserves Display Name update errors for retry handling", async () => {
+    const authError = new Error("metadata unavailable");
+    updateUser.mockResolvedValue({ data: { user: null }, error: authError });
+
+    await expect(authService.updateDisplayName("Alex Rivera"))
+      .rejects.toBe(authError);
+  });
+
   it("initiates the hosted OAuth redirect to the canonical return URL for each provider", async () => {
     signInWithOAuth.mockResolvedValue({ data: {}, error: null });
 

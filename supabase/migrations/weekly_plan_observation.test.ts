@@ -20,6 +20,7 @@ const migrationNames = [
   "20260727180100_finalize_legacy_weekly_plan_cutover.sql",
   "20260729120000_create_weekly_plan_observation.sql",
   "20260730071049_add_observation_function_failure_probe.sql",
+  "20260805120000_allow_oauth_auth_failure_incident.sql",
 ];
 const migrationPaths = migrationNames.map((name) =>
   fileURLToPath(new URL(`./${name}`, import.meta.url))
@@ -71,6 +72,19 @@ describe("Weekly Plan observation database contract", () => {
       "select count(*)::integer as count from public.weekly_plan_client_incidents",
     );
     expect(incidents.rows[0].count).toBe(1);
+
+    await database.exec(`
+      set role authenticated;
+      select public.record_weekly_plan_client_incident(
+        'oauth_auth_failure',
+        '{"provider":"google","phase":"session_restore","errorCode":"unverified_email"}'
+      );
+      reset role;
+    `);
+    const oauthIncidents = await database.query<{ count: number }>(
+      "select count(*)::integer as count from public.weekly_plan_client_incidents where event_type = 'oauth_auth_failure'",
+    );
+    expect(oauthIncidents.rows[0].count).toBe(1);
 
     await expect(database.exec(`
       set role authenticated;

@@ -8,9 +8,11 @@ export type ClientIncidentType =
   | "realtime_recovery_failure"
   | "unknown_command_outcome"
   | "revision_mismatch"
-  | "forced_reload_failure";
+  | "forced_reload_failure"
+  | "oauth_auth_failure";
 
 export interface ClientIncidentContext {
+  provider?: string;
   phase?: string;
   operation?: string;
   authorityStatus?: string;
@@ -18,6 +20,7 @@ export interface ClientIncidentContext {
 }
 
 const CONTEXT_KEYS = [
+  "provider",
   "phase",
   "operation",
   "authorityStatus",

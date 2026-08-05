@@ -6,9 +6,11 @@ import PlanDashboard from './components/PlanDashboard';
 import PerformanceDashboard from './components/PerformanceDashboard';
 import LoadingView from './components/LoadingView';
 import AuthScreen from './components/AuthScreen';
+import type { AuthView } from './components/AuthScreen';
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
 import PasswordRecoveryScreen from './components/PasswordRecoveryScreen';
+import DisplayNameGate from './components/DisplayNameGate';
 import {
   AuthoritativeWeeklyPlanRow,
   UserProfile,
@@ -50,6 +52,8 @@ type PlanAuthorityStatus =
   | 'stale'
   | 'unavailable';
 
+const OAUTH_INITIATING_VIEW_KEY = 'neuronutrition.oauth-initiating-view';
+
 const App: React.FC = () => {
   const isPasswordRecoveryRoute =
     window.location.pathname === PASSWORD_RECOVERY_PATH;
@@ -81,10 +85,17 @@ const App: React.FC = () => {
   const recoveringRealtimeRef = React.useRef(false);
   const realtimeDisconnectedRef = React.useRef(false);
   const recoveryEventReceivedRef = React.useRef(false);
+  const rejectedOAuthUserIdRef = React.useRef<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [authenticationError, setAuthenticationError] = useState<string | null>(null);
+  const [authView, setAuthView] = useState<AuthView>(() =>
+    sessionStorage.getItem(OAUTH_INITIATING_VIEW_KEY) === 'register'
+      ? 'register'
+      : 'login'
+  );
   // True from the moment a provider button is pressed until the browser is
   // redirected away. It gates a neutral "Signing you in…" interstitial that
   // replaces the logged-out Log In screen, so no logged-out flash or other
@@ -122,11 +133,18 @@ const App: React.FC = () => {
   const userFromSession = (session: Session | null): User | null => {
     if (!session?.user) return null;
 
+    const metadataName = session.user.user_metadata?.name;
+
     return {
       id: session.user.id,
       email: session.user.email || '',
-      name: session.user.user_metadata?.name || '',
+      name: typeof metadataName === 'string' ? metadataName.trim() : '',
     };
+  };
+
+  const oauthProviderFromSession = (session: Session | null): OAuthProvider | null => {
+    const provider = session?.user?.app_metadata?.provider;
+    return provider === 'google' || provider === 'apple' ? provider : null;
   };
 
   const errorMessage = (err: unknown, fallback: string) =>
@@ -209,7 +227,49 @@ const App: React.FC = () => {
 
     const applySession = (session: Session | null) => {
       if (!mounted) return;
-      const nextUser = userFromSession(session);
+
+      const oauthProvider = oauthProviderFromSession(session);
+      const invalidOAuthEmail = !!oauthProvider
+        && (!session?.user.email?.trim() || !session.user.email_confirmed_at);
+      if (invalidOAuthEmail) {
+        setAuthenticationError(
+          'We could not complete provider sign-in because no verified email was supplied. Please try again or use another sign-in method.',
+        );
+        if (rejectedOAuthUserIdRef.current !== session?.user.id) {
+          rejectedOAuthUserIdRef.current = session?.user.id ?? null;
+          void reportClientIncident('oauth_auth_failure', {
+            provider: oauthProvider,
+            phase: 'session_restore',
+            errorCode: 'unverified_email',
+          });
+          // Do not call another Supabase API from inside the synchronous auth
+          // callback. Deferring sign-out avoids the supabase-js callback deadlock.
+          void Promise.resolve().then(async () => {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                await authService.logout();
+                return;
+              } catch {
+                // A single retry handles a transient sign-out transport failure.
+              }
+            }
+
+              rejectedOAuthUserIdRef.current = null;
+              void reportClientIncident('oauth_auth_failure', {
+                provider: oauthProvider,
+                phase: 'session_cleanup',
+                errorCode: 'session_discard_failed',
+              });
+          });
+        }
+      }
+
+      const nextUser = invalidOAuthEmail ? null : userFromSession(session);
+      if (nextUser) {
+        rejectedOAuthUserIdRef.current = null;
+        sessionStorage.removeItem(OAUTH_INITIATING_VIEW_KEY);
+        setAuthenticationError(null);
+      }
       setUser(nextUser);
 
       if (!nextUser) {
@@ -248,7 +308,11 @@ const App: React.FC = () => {
       })
       .catch((sessionError) => {
         console.error('Failed to restore session:', sessionError);
-        if (mounted) setError('Could not restore your session. Please log in again.');
+        if (mounted) {
+          setAuthenticationError(
+            'Could not restore your session. Please try again or use another sign-in method.',
+          );
+        }
       })
       .finally(() => {
         if (mounted) {
@@ -271,7 +335,7 @@ const App: React.FC = () => {
   // Data loading is deliberately separate from the auth callback to avoid the
   // supabase-js auth callback deadlock and stale data leaking between users.
   useEffect(() => {
-    if (!user || loadedUserIdRef.current === user.id) return;
+    if (!user || !user.name || loadedUserIdRef.current === user.id) return;
 
     let cancelled = false;
     const cachedPlan = weeklyPlanCache.get(user.id);
@@ -336,10 +400,10 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, user?.name]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.name) return;
 
     let cancelled = false;
     let refetchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -485,12 +549,26 @@ const App: React.FC = () => {
   };
 
   const handleAuthSuccess = (authenticatedUser: User) => {
+    setAuthenticationError(null);
     setUser(authenticatedUser);
   };
 
-  const handleProviderSignIn = async (provider: OAuthProvider) => {
+  const handleDisplayNameSave = async (name: string) => {
+    await authService.updateDisplayName(name);
+    setUser((currentUser) => currentUser
+      ? { ...currentUser, name: name.trim() }
+      : currentUser
+    );
+  };
+
+  const handleProviderSignIn = async (
+    provider: OAuthProvider,
+    initiatingView: AuthView,
+  ) => {
     // Show the interstitial before initiating so the logged-out screen never
     // flashes back while the redirect is being set up.
+    setAuthView(initiatingView);
+    sessionStorage.setItem(OAUTH_INITIATING_VIEW_KEY, initiatingView);
     setIsOAuthRedirecting(true);
     try {
       await authService.signInWithOAuth(provider);
@@ -1072,8 +1150,19 @@ const App: React.FC = () => {
     }
     return (
       <AuthScreen
+        initialError={authenticationError ?? undefined}
+        initialView={authView}
         onSuccess={handleAuthSuccess}
         onProviderSignIn={handleProviderSignIn}
+      />
+    );
+  }
+
+  if (!user.name) {
+    return (
+      <DisplayNameGate
+        onLogout={handleLogout}
+        onSave={handleDisplayNameSave}
       />
     );
   }

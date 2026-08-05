@@ -9,11 +9,15 @@ import { Leaf, Mail, Lock, User as UserIcon, ArrowRight, Loader2 } from 'lucide-
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
+  initialError?: string;
+  initialView?: AuthView;
   // Initiates the hosted OAuth redirect. App owns this so it can immediately
   // render the "Signing you in…" interstitial (no logged-out flash). Optional
   // so the provider rail stays inert until wired.
-  onProviderSignIn?: (provider: OAuthProvider) => void;
+  onProviderSignIn?: (provider: OAuthProvider, view: AuthView) => void;
 }
+
+export type AuthView = 'login' | 'register';
 
 // Per-provider surface treatment for the express rail buttons. The shape
 // (full width, centered label, lift on hover) is shared; only the palette
@@ -37,7 +41,12 @@ const ProviderButton: React.FC<{
   </button>
 );
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) => {
+const AuthScreen: React.FC<AuthScreenProps> = ({
+  initialError = '',
+  initialView = 'login',
+  onSuccess,
+  onProviderSignIn,
+}) => {
   // A provider's button is visible only when its deployment flag is not `off`.
   // `verify` already collapses to `off` off the verification URL inside the
   // flags service, so an `on`/`verify` result here means "show the button".
@@ -46,10 +55,18 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) 
   const showGoogle = googleMode !== 'off';
   const showApple = appleMode !== 'off';
   const showProviderRail = showGoogle || showApple;
-  const [isLogin, setIsLogin] = useState(true);
+  const [isLogin, setIsLogin] = useState(initialView === 'login');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
   const [info, setInfo] = useState('');
+
+  React.useEffect(() => {
+    if (initialError) setError(initialError);
+  }, [initialError]);
+
+  React.useEffect(() => {
+    setIsLogin(initialView === 'login');
+  }, [initialView]);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -124,8 +141,19 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) 
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 font-medium">
-            {error}
+          <div className="mb-6">
+            <div role="alert" className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 font-medium">
+              {error}
+            </div>
+            {!isLogin && (
+              <button
+                type="button"
+                onClick={() => setIsLogin(true)}
+                className="mt-3 text-sm font-bold text-emerald-700 underline"
+              >
+                Back to Log In
+              </button>
+            )}
           </div>
         )}
 
@@ -216,7 +244,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) 
                 <ProviderButton
                   provider="google"
                   label="Continue with Google"
-                  onSelect={onProviderSignIn}
+                  onSelect={(provider) => onProviderSignIn?.(
+                    provider,
+                    isLogin ? 'login' : 'register',
+                  )}
                 />
               )}
 
@@ -225,7 +256,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) 
                   <ProviderButton
                     provider="apple"
                     label="Continue with Apple"
-                    onSelect={onProviderSignIn}
+                    onSelect={(provider) => onProviderSignIn?.(
+                      provider,
+                      isLogin ? 'login' : 'register',
+                    )}
                   />
                   <p role="note" className="text-xs leading-relaxed text-slate-400">
                     Signing in with Apple's private relay email creates a separate
