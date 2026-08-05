@@ -1,7 +1,27 @@
 import { User } from '../types';
 import { supabase } from './supabaseClient';
+import { OAUTH_REDIRECT_URL } from './applicationRoutes';
+import type { OAuthProvider } from './oauthProviderFlagsService';
 
 export const authService = {
+  // Starts Supabase's hosted browser OAuth flow. On success this navigates the
+  // whole page away to the provider, so control does not return; the caller
+  // renders the "Signing you in…" interstitial while the redirect is pending.
+  // `redirectTo` is the fixed production return URL because that is the only
+  // origin registered on the provider allow-list. See issue #60.
+  signInWithOAuth: async (provider: OAuthProvider): Promise<void> => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: OAUTH_REDIRECT_URL,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+  },
+
   login: async (email: string, password: string): Promise<User> => {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,

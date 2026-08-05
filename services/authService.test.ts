@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { updateUser, resetPasswordForEmail } = vi.hoisted(() => ({
+const { updateUser, resetPasswordForEmail, signInWithOAuth } = vi.hoisted(() => ({
   updateUser: vi.fn(),
   resetPasswordForEmail: vi.fn(),
+  signInWithOAuth: vi.fn(),
 }));
 
 vi.mock("./supabaseClient", () => ({
@@ -10,16 +11,19 @@ vi.mock("./supabaseClient", () => ({
     auth: {
       updateUser,
       resetPasswordForEmail,
+      signInWithOAuth,
     },
   },
 }));
 
 import { authService } from "./authService";
+import { OAUTH_REDIRECT_URL } from "./applicationRoutes";
 
 describe("authenticated security operations", () => {
   beforeEach(() => {
     updateUser.mockReset();
     resetPasswordForEmail.mockReset();
+    signInWithOAuth.mockReset();
   });
 
   it("sends the current and new password through the authenticated update contract", async () => {
@@ -76,5 +80,33 @@ describe("authenticated security operations", () => {
     await authService.completePasswordRecovery("recovered-secret3");
 
     expect(updateUser).toHaveBeenCalledWith({ password: "recovered-secret3" });
+  });
+
+  it("initiates the hosted OAuth redirect to the canonical return URL for each provider", async () => {
+    signInWithOAuth.mockResolvedValue({ data: {}, error: null });
+
+    await authService.signInWithOAuth("google");
+    expect(signInWithOAuth).toHaveBeenCalledWith({
+      provider: "google",
+      options: { redirectTo: OAUTH_REDIRECT_URL },
+    });
+
+    await authService.signInWithOAuth("apple");
+    expect(signInWithOAuth).toHaveBeenLastCalledWith({
+      provider: "apple",
+      options: { redirectTo: OAUTH_REDIRECT_URL },
+    });
+
+    expect(OAUTH_REDIRECT_URL).toBe("https://cmilios.github.io/neuro-nutrition/");
+  });
+
+  it("surfaces a failure to start the OAuth redirect so the caller can recover", async () => {
+    const authError = Object.assign(new Error("provider unreachable"), {
+      code: "oauth_provider_error",
+      status: 502,
+    });
+    signInWithOAuth.mockResolvedValue({ data: null, error: authError });
+
+    await expect(authService.signInWithOAuth("google")).rejects.toBe(authError);
   });
 });

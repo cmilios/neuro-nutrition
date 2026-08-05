@@ -27,6 +27,7 @@ import {
   rerollMeal,
 } from './services/aiService';
 import { authService } from './services/authService';
+import type { OAuthProvider } from './services/oauthProviderFlagsService';
 import { storageService } from './services/storageService';
 import {
   createWeeklyPlanInvalidationSubscription,
@@ -84,6 +85,11 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
+  // True from the moment a provider button is pressed until the browser is
+  // redirected away. It gates a neutral "Signing you in…" interstitial that
+  // replaces the logged-out Log In screen, so no logged-out flash or other
+  // user's cached data can appear while the OAuth redirect is pending.
+  const [isOAuthRedirecting, setIsOAuthRedirecting] = useState(false);
   const [recoverySessionStatus, setRecoverySessionStatus] = useState<
     'checking' | 'ready' | 'invalid'
   >(isPasswordRecoveryRoute ? 'checking' : 'invalid');
@@ -480,6 +486,23 @@ const App: React.FC = () => {
 
   const handleAuthSuccess = (authenticatedUser: User) => {
     setUser(authenticatedUser);
+  };
+
+  const handleProviderSignIn = async (provider: OAuthProvider) => {
+    // Show the interstitial before initiating so the logged-out screen never
+    // flashes back while the redirect is being set up.
+    setIsOAuthRedirecting(true);
+    try {
+      await authService.signInWithOAuth(provider);
+      // On success the browser navigates to the provider and control does not
+      // return; nothing else to do here.
+    } catch (oauthError) {
+      // The redirect could not be started. Return to the Log In screen so the
+      // user can retry or use email/password instead of being stranded on the
+      // interstitial.
+      console.error('Could not start OAuth sign-in:', oauthError);
+      setIsOAuthRedirecting(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -1037,7 +1060,22 @@ const App: React.FC = () => {
   }
 
   if (!user) {
-    return <AuthScreen onSuccess={handleAuthSuccess} />;
+    if (isOAuthRedirecting) {
+      return (
+        <div
+          role="status"
+          className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"
+        >
+          Signing you in…
+        </div>
+      );
+    }
+    return (
+      <AuthScreen
+        onSuccess={handleAuthSuccess}
+        onProviderSignIn={handleProviderSignIn}
+      />
+    );
   }
 
   if (isDataLoading && planAuthorityStatus === 'checking' && !mealPlan) {

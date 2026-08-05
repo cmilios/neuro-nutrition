@@ -1,13 +1,51 @@
 import React, { useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
+import {
+  getProviderMode,
+  type OAuthProvider,
+} from '../services/oauthProviderFlagsService';
 import { Leaf, Mail, Lock, User as UserIcon, ArrowRight, Loader2 } from 'lucide-react';
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
+  // Initiates the hosted OAuth redirect. App owns this so it can immediately
+  // render the "Signing you in…" interstitial (no logged-out flash). Optional
+  // so the provider rail stays inert until wired.
+  onProviderSignIn?: (provider: OAuthProvider) => void;
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
+// Per-provider surface treatment for the express rail buttons. The shape
+// (full width, centered label, lift on hover) is shared; only the palette
+// differs, so a single component avoids parallel edits when providers change.
+const providerButtonPalette: Record<OAuthProvider, string> = {
+  google: 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+  apple: 'border-slate-800 bg-slate-900 text-white hover:bg-slate-800',
+};
+
+const ProviderButton: React.FC<{
+  provider: OAuthProvider;
+  label: string;
+  onSelect?: (provider: OAuthProvider) => void;
+}> = ({ provider, label, onSelect }) => (
+  <button
+    type="button"
+    onClick={() => onSelect?.(provider)}
+    className={`w-full flex items-center justify-center gap-3 rounded-xl border py-3 font-semibold transition-all hover:-translate-y-0.5 ${providerButtonPalette[provider]}`}
+  >
+    {label}
+  </button>
+);
+
+const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess, onProviderSignIn }) => {
+  // A provider's button is visible only when its deployment flag is not `off`.
+  // `verify` already collapses to `off` off the verification URL inside the
+  // flags service, so an `on`/`verify` result here means "show the button".
+  const googleMode = getProviderMode('google');
+  const appleMode = getProviderMode('apple');
+  const showGoogle = googleMode !== 'off';
+  const showApple = appleMode !== 'off';
+  const showProviderRail = showGoogle || showApple;
   const [isLogin, setIsLogin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -162,6 +200,43 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
             )}
           </button>
         </form>
+
+        {showProviderRail && (
+          <div className="mt-8">
+            <div className="relative flex items-center" aria-hidden="true">
+              <div className="flex-grow border-t border-slate-100" />
+              <span className="mx-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Faster sign-in
+              </span>
+              <div className="flex-grow border-t border-slate-100" />
+            </div>
+
+            <div className="mt-6 space-y-3">
+              {showGoogle && (
+                <ProviderButton
+                  provider="google"
+                  label="Continue with Google"
+                  onSelect={onProviderSignIn}
+                />
+              )}
+
+              {showApple && (
+                <>
+                  <ProviderButton
+                    provider="apple"
+                    label="Continue with Apple"
+                    onSelect={onProviderSignIn}
+                  />
+                  <p role="note" className="text-xs leading-relaxed text-slate-400">
+                    Signing in with Apple's private relay email creates a separate
+                    account from any existing email/password account at the same
+                    underlying address.
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <p className="mt-8 text-center text-xs text-slate-400">
