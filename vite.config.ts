@@ -1,8 +1,8 @@
 import path from 'path';
-import { copyFile, mkdir } from 'node:fs/promises';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { APPLICATION_BASE_PATH } from './services/applicationRoutes';
+import { copyGithubPagesRouteEntrypoints } from './build/githubPagesRouteEntrypoints';
 
 export default defineConfig(() => {
   return {
@@ -14,13 +14,10 @@ export default defineConfig(() => {
     plugins: [
       react(),
       {
-        name: 'github-pages-recovery-route',
+        name: 'github-pages-application-routes',
         async closeBundle() {
-          const recoveryDirectory = path.resolve(__dirname, 'dist/recover-password');
-          await mkdir(recoveryDirectory, { recursive: true });
-          await copyFile(
-            path.resolve(__dirname, 'dist/index.html'),
-            path.join(recoveryDirectory, 'index.html'),
+          await copyGithubPagesRouteEntrypoints(
+            path.resolve(__dirname, 'dist'),
           );
         },
       },

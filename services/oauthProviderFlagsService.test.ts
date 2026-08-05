@@ -78,6 +78,12 @@ describe("oauthProviderFlagsService.getProviderMode", () => {
       expect(getProviderMode(provider)).toBe("verify");
     });
 
+    it("returns 'verify' on the canonical GitHub Pages directory URL", () => {
+      vi.stubEnv(key, "verify");
+      setUrl(`${OAUTH_VERIFICATION_PATH}/`);
+      expect(getProviderMode(provider)).toBe("verify");
+    });
+
     it("collapses 'verify' to 'off' when not on the verification URL", () => {
       vi.stubEnv(key, "verify");
       setUrl("/neuro-nutrition/");

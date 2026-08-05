@@ -23,7 +23,10 @@ const readRawMode = (provider: OAuthProvider): string | undefined => {
 
 const isOnVerificationUrl = (): boolean =>
   typeof window !== 'undefined' &&
-  window.location.pathname === OAUTH_VERIFICATION_PATH;
+  (
+    window.location.pathname === OAUTH_VERIFICATION_PATH
+    || window.location.pathname === `${OAUTH_VERIFICATION_PATH}/`
+  );
 
 /**
  * Resolve the effective deployment mode for a provider.
