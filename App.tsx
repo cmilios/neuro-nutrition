@@ -6,6 +6,7 @@ import PlanDashboard from './components/PlanDashboard';
 import PerformanceDashboard from './components/PerformanceDashboard';
 import LoadingView from './components/LoadingView';
 import AuthScreen from './components/AuthScreen';
+import OAuthAuthPrototype from './components/OAuthAuthPrototype'; // THROWAWAY — ticket #46, remove with the prototype
 import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
 import PasswordRecoveryScreen from './components/PasswordRecoveryScreen';
@@ -50,6 +51,11 @@ type PlanAuthorityStatus =
   | 'unavailable';
 
 const App: React.FC = () => {
+  // THROWAWAY prototype gate (ticket #46). Remove with OAuthAuthPrototype.
+  const isOAuthAuthPrototypeRoute =
+    new URLSearchParams(window.location.search).get('prototype') ===
+    'oauth-auth';
+
   const isPasswordRecoveryRoute =
     window.location.pathname === PASSWORD_RECOVERY_PATH;
   const [user, setUser] = useState<User | null>(null);
@@ -1001,6 +1007,10 @@ const App: React.FC = () => {
       commandId: null,
     });
   };
+
+  if (isOAuthAuthPrototypeRoute) {
+    return <OAuthAuthPrototype />;
+  }
 
   if (
     isAuthChecking
