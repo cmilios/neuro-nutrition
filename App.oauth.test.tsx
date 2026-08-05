@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { signInWithOAuth, getProviderMode } = vi.hoisted(() => ({
+const { signInWithOAuth, getProviderMode, reportClientIncident } = vi.hoisted(() => ({
   signInWithOAuth: vi.fn(),
   getProviderMode: vi.fn(),
+  reportClientIncident: vi.fn(),
 }));
 
 vi.mock("./services/supabaseClient", () => ({
@@ -55,6 +56,10 @@ vi.mock("./services/oauthProviderFlagsService", () => ({
   getProviderMode,
 }));
 
+vi.mock("./services/clientIncidentTelemetry", () => ({
+  reportClientIncident,
+}));
+
 import App from "./App";
 
 describe("application OAuth redirect interstitial", () => {
@@ -62,6 +67,8 @@ describe("application OAuth redirect interstitial", () => {
     window.history.replaceState({}, "", "/neuro-nutrition/");
     signInWithOAuth.mockReset();
     getProviderMode.mockReset().mockReturnValue("on");
+    reportClientIncident.mockReset().mockResolvedValue(undefined);
+    sessionStorage.clear();
   });
 
   // R1 — initiating sign-in shows the neutral interstitial in place of the
@@ -78,6 +85,8 @@ describe("application OAuth redirect interstitial", () => {
     await userEvent.click(googleButton);
 
     expect(signInWithOAuth).toHaveBeenCalledWith("google");
+    expect(sessionStorage.getItem("neuronutrition.oauth-initiating-provider"))
+      .toBe("google");
     expect(await screen.findByText(/signing you in/i)).toBeInTheDocument();
     // The logged-out Log In surface is gone: no provider rail, no email field.
     expect(
@@ -99,20 +108,60 @@ describe("application OAuth redirect interstitial", () => {
     expect(await screen.findByText(/signing you in/i)).toBeInTheDocument();
   });
 
+  it.each(["google", "apple"] as const)(
+    "restores the initiating view when browser back cancels %s sign-in",
+    async (provider) => {
+      signInWithOAuth.mockReturnValue(new Promise(() => {}));
+      render(<App />);
+
+      await userEvent.click(await screen.findByRole("button", {
+        name: new RegExp(`continue with ${provider}`, "i"),
+      }));
+      const pageShow = new Event("pageshow");
+      Object.defineProperty(pageShow, "persisted", { value: true });
+      act(() => window.dispatchEvent(pageShow));
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        new RegExp(`${provider} sign-in was canceled`, "i"),
+      );
+      expect(screen.getByRole("button", {
+        name: new RegExp(`continue with ${provider}`, "i"),
+      })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/you@example.com/i)).toBeInTheDocument();
+      expect(reportClientIncident).not.toHaveBeenCalled();
+    },
+  );
+
   // If the redirect cannot be started, the user returns to the Log In screen
   // (with email/password) rather than being stranded on the interstitial.
-  it("returns to the Log In screen when the redirect fails to start", async () => {
+  it.each(["google", "apple"] as const)(
+    "returns to Log In with a retryable toast when %s redirect setup fails",
+    async (provider) => {
     signInWithOAuth.mockRejectedValue(new Error("provider unreachable"));
     render(<App />);
 
-    const googleButton = await screen.findByRole("button", {
-      name: /continue with google/i,
+    const providerButton = await screen.findByRole("button", {
+      name: new RegExp(`continue with ${provider}`, "i"),
     });
-    await userEvent.click(googleButton);
+    await userEvent.click(providerButton);
 
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/you@example.com/i)).toBeInTheDocument(),
     );
     expect(screen.queryByText(/signing you in/i)).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      new RegExp(`couldn't complete ${provider} sign-in`, "i"),
+    );
+    expect(screen.getByRole("button", { name: /dismiss notification/i }))
+      .toBeInTheDocument();
+    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", {
+      provider,
+      lifecycleStage: "redirect_start",
+      errorCode: "redirect_start_failed",
+      releaseIdentifier: "development",
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    expect(sessionStorage.getItem("neuronutrition.oauth-initiating-provider"))
+      .toBeNull();
   });
 });

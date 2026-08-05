@@ -14,17 +14,23 @@ export type ClientIncidentType =
 export interface ClientIncidentContext {
   provider?: string;
   phase?: string;
+  lifecycleStage?: string;
   operation?: string;
   authorityStatus?: string;
   errorCode?: string;
+  releaseIdentifier?: string;
+  timestamp?: string;
 }
 
 const CONTEXT_KEYS = [
   "provider",
   "phase",
+  "lifecycleStage",
   "operation",
   "authorityStatus",
   "errorCode",
+  "releaseIdentifier",
+  "timestamp",
 ] as const;
 
 const privacyLimitedContext = (

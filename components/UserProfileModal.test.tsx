@@ -131,6 +131,33 @@ describe("UserProfileModal Account Security", () => {
     );
   });
 
+  it.each(["google", "apple"] as const)(
+    "directs an unavailable-only-%s user to support without password recovery",
+    async (provider) => {
+    getProviderMode.mockReturnValue("off");
+    const props = createProps();
+    props.onGetConnectedSignInMethods.mockResolvedValue([
+      { identityId: `${provider}-1`, provider },
+    ]);
+    const user = userEvent.setup();
+    render(<UserProfileModal {...props} />);
+
+    await user.click(screen.getByRole("tab", { name: "Security" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      new RegExp(`${provider} sign-in is temporarily unavailable`, "i"),
+    );
+    expect(screen.getByRole("link", { name: /contact support/i }))
+      .toHaveAttribute(
+        "href",
+        "https://github.com/cmilios/neuro-nutrition/issues/new",
+      );
+    expect(screen.queryByText(/forgot your current password/i))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send recovery email/i }))
+      .not.toBeInTheDocument();
+  });
+
   it("disconnects a selected method when another sign-in method remains", async () => {
     const props = createProps();
     props.onGetConnectedSignInMethods

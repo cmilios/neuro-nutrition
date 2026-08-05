@@ -123,8 +123,10 @@ describe("post-redirect session restore", () => {
     expect(await screen.findByText("Welcome back, Alex")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Choose your Display Name" }))
       .not.toBeInTheDocument();
-    expect(getProfileData).toHaveBeenCalledWith("oauth-user-1");
-    expect(getCurrent).toHaveBeenCalledWith("oauth-user-1");
+    await waitFor(() => {
+      expect(getProfileData).toHaveBeenCalledWith("oauth-user-1");
+      expect(getCurrent).toHaveBeenCalledWith("oauth-user-1");
+    });
   });
 
   it.each(["google", "apple"] as const)(
@@ -262,11 +264,12 @@ describe("post-redirect session restore", () => {
     });
 
     await waitFor(() => expect(logout).toHaveBeenCalledTimes(2));
-    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", {
+    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", expect.objectContaining({
       provider: "google",
-      phase: "session_restore",
+      lifecycleStage: "session_restore",
       errorCode: "unverified_email",
-    });
+      releaseIdentifier: "development",
+    }));
     expect(reportClientIncident).not.toHaveBeenCalledWith(
       "oauth_auth_failure",
       expect.objectContaining({ errorCode: "session_discard_failed" }),
@@ -278,11 +281,11 @@ describe("post-redirect session restore", () => {
     "fails closed and discards a %s session without a verified email",
     async (provider) => {
     getSession.mockResolvedValue({ data: { session: null }, error: null });
-
     render(<App />);
 
     expect(await screen.findByRole("button", { name: /^sign in$/i }))
       .toBeInTheDocument();
+    sessionStorage.setItem("neuronutrition.oauth-initiating-provider", provider);
     await act(async () => {
       authStateChangeCallbacks[0](
         "SIGNED_IN",
@@ -290,33 +293,122 @@ describe("post-redirect session restore", () => {
       );
     });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /could not complete provider sign-in/i,
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      new RegExp(`couldn't complete ${provider} sign-in`, "i"),
     );
     expect(screen.getByRole("button", { name: new RegExp(`continue with ${provider}`, "i") }))
       .toBeInTheDocument();
     await waitFor(() => expect(logout).toHaveBeenCalledOnce());
-    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", {
+    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", expect.objectContaining({
       provider,
-      phase: "session_restore",
+      lifecycleStage: "session_restore",
       errorCode: "unverified_email",
-    });
+      releaseIdentifier: "development",
+    }));
     expect(getProfileData).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem("neuronutrition.oauth-initiating-provider"))
+      .toBeNull();
   });
 
   it("returns to Log In with a retryable message when session restoration fails", async () => {
+    sessionStorage.setItem("neuronutrition.oauth-initiating-provider", "google");
     getSession.mockRejectedValue(new Error("provider details must stay private"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     render(<App />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /could not restore your session/i,
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /couldn't complete google sign-in/i,
     );
     expect(screen.getByRole("button", { name: /continue with google/i }))
       .toBeInTheDocument();
     expect(screen.getByPlaceholderText(/you@example.com/i)).toBeInTheDocument();
+    expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", {
+      provider: "google",
+      lifecycleStage: "session_restore",
+      errorCode: "session_restore_failed",
+      releaseIdentifier: "development",
+      timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    expect(JSON.stringify(reportClientIncident.mock.calls)).not.toContain(
+      "provider details must stay private",
+    );
   });
+
+  it.each(["google", "apple"] as const)(
+    "treats returning from %s without a session as cancellation without telemetry",
+    async (provider) => {
+      sessionStorage.setItem("neuronutrition.oauth-initiating-provider", provider);
+      sessionStorage.setItem("neuronutrition.oauth-initiating-view", "register");
+      getSession.mockResolvedValue({ data: { session: null }, error: null });
+
+      render(<App />);
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        new RegExp(`${provider} sign-in was canceled`, "i"),
+      );
+      expect(screen.getByPlaceholderText(/john doe/i)).toBeInTheDocument();
+      expect(screen.getByRole("button", {
+        name: new RegExp(`continue with ${provider}`, "i"),
+      })).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/you@example.com/i)).toBeInTheDocument();
+      expect(reportClientIncident).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["google", "apple"] as const)(
+    "treats denied %s consent as cancellation without telemetry",
+    async (provider) => {
+      sessionStorage.setItem("neuronutrition.oauth-initiating-provider", provider);
+      sessionStorage.setItem("neuronutrition.oauth-initiating-view", "login");
+      window.history.replaceState(
+        {},
+        "",
+        "/neuro-nutrition/?error=access_denied&error_description=user%20denied",
+      );
+      getSession.mockResolvedValue({ data: { session: null }, error: null });
+
+      render(<App />);
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        new RegExp(`${provider} sign-in was canceled`, "i"),
+      );
+      expect(reportClientIncident).not.toHaveBeenCalled();
+      expect(window.location.search).toBe("");
+    },
+  );
+
+  it.each(["google", "apple"] as const)(
+    "reports a sanitized %s callback failure and returns to the initiating view",
+    async (provider) => {
+      sessionStorage.setItem("neuronutrition.oauth-initiating-provider", provider);
+      sessionStorage.setItem("neuronutrition.oauth-initiating-view", "login");
+      window.history.replaceState(
+        {},
+        "",
+        `/neuro-nutrition/?error=server_error&error_description=secret-token-alex%40example.com`,
+      );
+      getSession.mockResolvedValue({ data: { session: null }, error: null });
+
+      render(<App />);
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        new RegExp(`couldn't complete ${provider} sign-in`, "i"),
+      );
+      expect(screen.getByPlaceholderText(/you@example.com/i)).toBeInTheDocument();
+      expect(reportClientIncident).toHaveBeenCalledWith("oauth_auth_failure", {
+        provider,
+        lifecycleStage: "callback",
+        errorCode: "oauth_callback_failed",
+        releaseIdentifier: "development",
+        timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      });
+      const payload = JSON.stringify(reportClientIncident.mock.calls);
+      expect(payload).not.toContain("secret-token");
+      expect(payload).not.toContain("alex@example.com");
+      expect(payload).not.toContain("error_description");
+    },
+  );
 
   it("returns to the initiating Create Account view with a Back to Log In action", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);

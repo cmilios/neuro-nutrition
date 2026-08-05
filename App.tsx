@@ -11,6 +11,7 @@ import WeeklyReviewModal from './components/WeeklyReviewModal';
 import UserProfileModal from './components/UserProfileModal';
 import PasswordRecoveryScreen from './components/PasswordRecoveryScreen';
 import DisplayNameGate from './components/DisplayNameGate';
+import Toast, { type ToastMessage } from './components/Toast';
 import {
   AuthoritativeWeeklyPlanRow,
   UserProfile,
@@ -53,6 +54,26 @@ type PlanAuthorityStatus =
   | 'unavailable';
 
 const OAUTH_INITIATING_VIEW_KEY = 'neuronutrition.oauth-initiating-view';
+const OAUTH_INITIATING_PROVIDER_KEY = 'neuronutrition.oauth-initiating-provider';
+
+const providerName = (provider: OAuthProvider) =>
+  provider === 'google' ? 'Google' : 'Apple';
+
+const oauthCallbackError = (): string | null => {
+  const search = new URLSearchParams(window.location.search);
+  const hashQuery = window.location.hash.includes('?')
+    ? window.location.hash.slice(window.location.hash.indexOf('?') + 1)
+    : window.location.hash.replace(/^#/, '');
+  const hash = new URLSearchParams(hashQuery);
+  return search.get('error_code')
+    ?? search.get('error')
+    ?? hash.get('error_code')
+    ?? hash.get('error');
+};
+
+const isOAuthCancellation = (errorCode: string | null) =>
+  errorCode === null
+  || ['access_denied', 'user_denied', 'oauth_cancelled'].includes(errorCode);
 
 const App: React.FC = () => {
   const isPasswordRecoveryRoute =
@@ -91,6 +112,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [authenticationError, setAuthenticationError] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [authView, setAuthView] = useState<AuthView>(() =>
     sessionStorage.getItem(OAUTH_INITIATING_VIEW_KEY) === 'register'
       ? 'register'
@@ -149,6 +171,41 @@ const App: React.FC = () => {
 
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error && err.message ? err.message : fallback;
+
+  const showOAuthToast = (
+    provider: OAuthProvider,
+    kind: ToastMessage['kind'],
+  ) => {
+    setToast({
+      id: Date.now(),
+      kind,
+      message: kind === 'info'
+        ? `${providerName(provider)} sign-in was canceled. No changes were made.`
+        : `We couldn't complete ${providerName(provider)} sign-in. Please try again.`,
+    });
+  };
+
+  const clearPendingOAuth = () => {
+    sessionStorage.removeItem(OAUTH_INITIATING_VIEW_KEY);
+    sessionStorage.removeItem(OAUTH_INITIATING_PROVIDER_KEY);
+  };
+
+  const reportOAuthFailure = (
+    provider: OAuthProvider,
+    lifecycleStage: string,
+    errorCode: string,
+  ) => {
+    void reportClientIncident('oauth_auth_failure', {
+      provider,
+      lifecycleStage,
+      errorCode,
+      releaseIdentifier: import.meta.env.VITE_RELEASE_ID?.trim() || 'development',
+      timestamp: new Date().toISOString(),
+    });
+  };
+
+  const oauthFailureMessage = (provider: OAuthProvider) =>
+    `We could not complete ${providerName(provider)} sign-in. Please try again or use another sign-in method.`;
 
   const reportUnknownCommandOutcome = (operation: string) => {
     void reportClientIncident('unknown_command_outcome', {
@@ -232,16 +289,13 @@ const App: React.FC = () => {
       const invalidOAuthEmail = !!oauthProvider
         && (!session?.user.email?.trim() || !session.user.email_confirmed_at);
       if (invalidOAuthEmail) {
-        setAuthenticationError(
-          'We could not complete provider sign-in because no verified email was supplied. Please try again or use another sign-in method.',
-        );
+        setAuthenticationError(oauthFailureMessage(oauthProvider));
+        setIsOAuthRedirecting(false);
+        showOAuthToast(oauthProvider, 'error');
+        clearPendingOAuth();
         if (rejectedOAuthUserIdRef.current !== session?.user.id) {
           rejectedOAuthUserIdRef.current = session?.user.id ?? null;
-          void reportClientIncident('oauth_auth_failure', {
-            provider: oauthProvider,
-            phase: 'session_restore',
-            errorCode: 'unverified_email',
-          });
+          reportOAuthFailure(oauthProvider, 'session_restore', 'unverified_email');
           // Do not call another Supabase API from inside the synchronous auth
           // callback. Deferring sign-out avoids the supabase-js callback deadlock.
           void Promise.resolve().then(async () => {
@@ -255,11 +309,11 @@ const App: React.FC = () => {
             }
 
               rejectedOAuthUserIdRef.current = null;
-              void reportClientIncident('oauth_auth_failure', {
-                provider: oauthProvider,
-                phase: 'session_cleanup',
-                errorCode: 'session_discard_failed',
-              });
+              reportOAuthFailure(
+                oauthProvider,
+                'session_cleanup',
+                'session_discard_failed',
+              );
           });
         }
       }
@@ -267,7 +321,7 @@ const App: React.FC = () => {
       const nextUser = invalidOAuthEmail ? null : userFromSession(session);
       if (nextUser) {
         rejectedOAuthUserIdRef.current = null;
-        sessionStorage.removeItem(OAUTH_INITIATING_VIEW_KEY);
+        clearPendingOAuth();
         setAuthenticationError(null);
       }
       setUser(nextUser);
@@ -301,17 +355,52 @@ const App: React.FC = () => {
       setIsAuthChecking(false);
     });
 
+    const pendingProvider = sessionStorage.getItem(OAUTH_INITIATING_PROVIDER_KEY);
+    const oauthProvider = pendingProvider === 'google' || pendingProvider === 'apple'
+      ? pendingProvider
+      : null;
+
     supabase.auth.getSession()
       .then(({ data, error: sessionError }) => {
         if (sessionError) throw sessionError;
         applySession(data.session);
+        if (!data.session && oauthProvider) {
+          const callbackError = oauthCallbackError();
+          setIsOAuthRedirecting(false);
+          setAuthenticationError(null);
+          showOAuthToast(
+            oauthProvider,
+            isOAuthCancellation(callbackError) ? 'info' : 'error',
+          );
+          if (!isOAuthCancellation(callbackError)) {
+            reportOAuthFailure(
+              oauthProvider,
+              'callback',
+              'oauth_callback_failed',
+            );
+          }
+          clearPendingOAuth();
+          window.history.replaceState({}, '', window.location.pathname);
+        }
       })
       .catch((sessionError) => {
         console.error('Failed to restore session:', sessionError);
         if (mounted) {
-          setAuthenticationError(
-            'Could not restore your session. Please try again or use another sign-in method.',
-          );
+          if (oauthProvider) {
+            setAuthenticationError(oauthFailureMessage(oauthProvider));
+            setIsOAuthRedirecting(false);
+            showOAuthToast(oauthProvider, 'error');
+            reportOAuthFailure(
+              oauthProvider,
+              'session_restore',
+              'session_restore_failed',
+            );
+            clearPendingOAuth();
+          } else {
+            setAuthenticationError(
+              'Could not restore your session. Please try again or use another sign-in method.',
+            );
+          }
         }
       })
       .finally(() => {
@@ -330,6 +419,25 @@ const App: React.FC = () => {
       mounted = false;
       subscription.unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      const storedProvider = sessionStorage.getItem(OAUTH_INITIATING_PROVIDER_KEY);
+      if (storedProvider !== 'google' && storedProvider !== 'apple') return;
+      setAuthView(
+        sessionStorage.getItem(OAUTH_INITIATING_VIEW_KEY) === 'register'
+          ? 'register'
+          : 'login',
+      );
+      setIsOAuthRedirecting(false);
+      setAuthenticationError(null);
+      showOAuthToast(storedProvider, 'info');
+      clearPendingOAuth();
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
   }, []);
 
   // Data loading is deliberately separate from the auth callback to avoid the
@@ -569,6 +677,7 @@ const App: React.FC = () => {
     // flashes back while the redirect is being set up.
     setAuthView(initiatingView);
     sessionStorage.setItem(OAUTH_INITIATING_VIEW_KEY, initiatingView);
+    sessionStorage.setItem(OAUTH_INITIATING_PROVIDER_KEY, provider);
     setIsOAuthRedirecting(true);
     try {
       await authService.signInWithOAuth(provider);
@@ -580,12 +689,18 @@ const App: React.FC = () => {
       // interstitial.
       console.error('Could not start OAuth sign-in:', oauthError);
       setIsOAuthRedirecting(false);
+      setAuthenticationError(oauthFailureMessage(provider));
+      showOAuthToast(provider, 'error');
+      reportOAuthFailure(provider, 'redirect_start', 'redirect_start_failed');
+      clearPendingOAuth();
     }
   };
 
   const handleLogout = async () => {
     try {
       await authService.logout();
+      if (user) weeklyPlanCache.clear(user.id);
+      clearPendingOAuth();
       loadedUserIdRef.current = null;
       authoritativePlanRef.current = null;
       setAuthoritativePlan(null);
@@ -1103,16 +1218,23 @@ const App: React.FC = () => {
     });
   };
 
+  const renderWithToast = (content: React.ReactNode) => (
+    <>
+      {content}
+      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
+    </>
+  );
+
   if (
     isAuthChecking
     || (isPasswordRecoveryRoute && recoverySessionStatus === 'checking')
   ) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>;
+    return renderWithToast(<div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-400">Loading...</div>);
   }
 
   if (isPasswordRecoveryRoute) {
     if (recoverySessionStatus !== 'ready') {
-      return (
+      return renderWithToast(
         <main className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
           <div className="w-full max-w-md rounded-2xl border border-red-100 bg-white p-8 shadow-xl">
             <h1 className="text-2xl font-black text-slate-950">Recover password</h1>
@@ -1130,7 +1252,7 @@ const App: React.FC = () => {
         </main>
       );
     }
-    return (
+    return renderWithToast(
       <PasswordRecoveryScreen
         onComplete={authService.completePasswordRecovery}
       />
@@ -1139,7 +1261,7 @@ const App: React.FC = () => {
 
   if (!user) {
     if (isOAuthRedirecting) {
-      return (
+      return renderWithToast(
         <div
           role="status"
           className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500"
@@ -1148,7 +1270,7 @@ const App: React.FC = () => {
         </div>
       );
     }
-    return (
+    return renderWithToast(
       <AuthScreen
         initialError={authenticationError ?? undefined}
         initialView={authView}
@@ -1159,7 +1281,7 @@ const App: React.FC = () => {
   }
 
   if (!user.name) {
-    return (
+    return renderWithToast(
       <DisplayNameGate
         onLogout={handleLogout}
         onSave={handleDisplayNameSave}
@@ -1168,7 +1290,7 @@ const App: React.FC = () => {
   }
 
   if (isDataLoading && planAuthorityStatus === 'checking' && !mealPlan) {
-    return (
+    return renderWithToast(
       <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500">
         Checking your Current Weekly Plan…
       </div>
@@ -1186,7 +1308,7 @@ const App: React.FC = () => {
   const planLifecycleBlocked =
     planIsReadOnly || !!rerollingState || pendingMealRerolls.length > 0;
 
-  return (
+  return renderWithToast(
     <Layout
       user={user}
       userProfile={profile}

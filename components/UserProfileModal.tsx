@@ -144,6 +144,12 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const healthDirtyRef = useRef(false);
   const hasPasswordIdentity = connectedMethodsError !== null
     || connectedMethods.some((method) => method.provider === 'email');
+  const unavailableOnlyMethod = connectedMethodsLoaded
+    && connectedMethods.length === 1
+    && isOAuthProvider(connectedMethods[0].provider)
+    && getProviderMode(connectedMethods[0].provider) === 'off'
+    ? connectedMethods[0]
+    : null;
 
   const clearPasswordDraft = () => {
     setCurrentPassword('');
@@ -693,6 +699,20 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           })}
                         </ul>
                       )}
+                      {unavailableOnlyMethod && (
+                        <p role="status" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          {getProviderName(unavailableOnlyMethod.provider)} sign-in is temporarily unavailable.{' '}
+                          <a
+                            href="https://github.com/cmilios/neuro-nutrition/issues/new"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-bold underline"
+                          >
+                            Contact support
+                          </a>{' '}
+                          for help accessing your account.
+                        </p>
+                      )}
                     </section>
                     {connectedMethodsLoaded && (
                     <form onSubmit={submitPassword} className="space-y-4">
@@ -765,6 +785,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         {securityStatus.message}
                       </p>
                     )}
+                    {hasPasswordIdentity && (
                     <div className="mt-8 border-t border-slate-200 pt-6">
                       <h4 className="font-bold text-slate-900">Forgot your current password?</h4>
                       <p className="mt-1 text-sm text-slate-500">Continue on the separate recovery screen without ending this session.</p>
@@ -772,6 +793,7 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         {recoverySending ? 'Sending…' : 'Send recovery email'}
                       </button>
                     </div>
+                    )}
                   </div>
                 )}
 

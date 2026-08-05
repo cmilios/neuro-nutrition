@@ -35,6 +35,14 @@ describe("authenticated security operations", () => {
     unlinkIdentity.mockReset();
   });
 
+  it("logs out only the current browser session", async () => {
+    signOut.mockResolvedValue({ error: null });
+
+    await authService.logout();
+
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
   it("lists connected sign-in methods from the authenticated user's identities", async () => {
     getUser.mockResolvedValue({
       data: {

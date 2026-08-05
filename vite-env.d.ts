@@ -7,6 +7,7 @@ interface ImportMetaEnv {
     // Any missing, empty, or unrecognized value fails closed to 'off'.
     readonly VITE_OAUTH_GOOGLE_MODE?: string
     readonly VITE_OAUTH_APPLE_MODE?: string
+    readonly VITE_RELEASE_ID?: string
 }
 
 interface ImportMeta {

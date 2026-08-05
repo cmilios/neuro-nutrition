@@ -26,6 +26,34 @@ describe("client incident telemetry", () => {
     });
   });
 
+  it("sends only the sanitized OAuth incident contract", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const report = createClientIncidentReporter({ rpc } as never);
+
+    await report("oauth_auth_failure", {
+      provider: "apple",
+      lifecycleStage: "callback",
+      errorCode: "oauth_callback_failed",
+      releaseIdentifier: "release-63",
+      timestamp: "2026-08-05T18:00:00.000Z",
+      token: "secret-token",
+      authorizationCode: "secret-code",
+      email: "alex@example.com",
+      rawError: "provider-specific text",
+    } as never);
+
+    expect(rpc).toHaveBeenCalledWith("record_weekly_plan_client_incident", {
+      p_event_type: "oauth_auth_failure",
+      p_context: {
+        provider: "apple",
+        lifecycleStage: "callback",
+        errorCode: "oauth_callback_failed",
+        releaseIdentifier: "release-63",
+        timestamp: "2026-08-05T18:00:00.000Z",
+      },
+    });
+  });
+
   it("never rejects when telemetry storage fails", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: null,

@@ -714,6 +714,77 @@ describe("application generation flow", () => {
     })).toBeInTheDocument();
   });
 
+  it("clears user state and the cached Current Weekly Plan before showing Log In", async () => {
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    const cacheKey = "neuronutrition_current_weekly_plan_user-1";
+    sessionStorage.setItem(cacheKey, "cached user data");
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText("Test Berry Breakfast");
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("button", { name: "Log Out" }));
+
+    expect(logout).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("button", { name: /^sign in$/i }))
+      .toBeInTheDocument();
+    expect(sessionStorage.getItem(cacheKey)).toBeNull();
+    expect(screen.queryByText("Welcome back, Alex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test Berry Breakfast")).not.toBeInTheDocument();
+  });
+
+  it("preserves the unsaved Health Profile guard before logout", async () => {
+    getProfileData.mockResolvedValue(null);
+    getCurrent.mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Let's build your plan." });
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    const account = screen.getByRole("dialog", { name: "Account" });
+    const age = within(account).getAllByRole("spinbutton")[0];
+    await user.clear(age);
+    await user.type(age, "31");
+    await user.click(screen.getByRole("button", { name: "Log Out" }));
+
+    expect(screen.getByRole("alertdialog", {
+      name: "Discard unsaved Health Profile changes?",
+    })).toBeInTheDocument();
+    expect(logout).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Discard Changes" }));
+    expect(logout).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Account open with a retryable error when logout fails", async () => {
+    getProfileData.mockResolvedValue(null);
+    getCurrent.mockResolvedValue(null);
+    logout.mockRejectedValue(new Error("provider-specific failure"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Let's build your plan." });
+    await user.click(screen.getByRole("button", { name: "Open Account" }));
+    await user.click(screen.getByRole("button", { name: "Log Out" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not log out. Please try again.",
+    );
+    expect(screen.getByRole("dialog", { name: "Account" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^sign in$/i }))
+      .not.toBeInTheDocument();
+  });
+
   it("gives a safe next action when a password change requires stronger authentication", async () => {
     const profile = {
       age: 30,
