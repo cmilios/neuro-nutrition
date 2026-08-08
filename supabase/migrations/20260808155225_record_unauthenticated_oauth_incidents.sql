@@ -14,7 +14,8 @@ alter table public.weekly_plan_client_incidents
   alter column user_id drop not null;
 
 -- 2. The event_type allow-list, restated in full so this migration repairs the
---    constraint whether or not 20260805120000 has been applied.
+--    constraint whether or not 20260808155145_allow_oauth_auth_failure_incident
+--    has been applied.
 alter table public.weekly_plan_client_incidents
   drop constraint weekly_plan_client_incidents_event_type_check;
 

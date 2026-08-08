@@ -192,7 +192,7 @@ gh variable set VITE_OAUTH_APPLE_MODE --body on
 
 Before releasing the Account experience:
 
-- Apply `20260729135108_create_health_profile_plan_replacement_commands.sql`
+- Apply `20260730062107_create_health_profile_plan_replacement_commands.sql`
   before deploying the updated `generate-meal-plan` Edge Function and web app.
 - In Supabase Auth, require the current password for authenticated password
   changes and enforce a minimum of eight characters with at least one letter

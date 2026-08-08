@@ -19,10 +19,10 @@ const migrationNames = [
   "20260727177500_enter_weekly_plan_maintenance.sql",
   "20260727180000_cut_over_legacy_weekly_plans.sql",
   "20260727180100_finalize_legacy_weekly_plan_cutover.sql",
-  "20260729120000_create_weekly_plan_observation.sql",
-  "20260730071049_add_observation_function_failure_probe.sql",
-  "20260805120000_allow_oauth_auth_failure_incident.sql",
-  "20260808120000_record_unauthenticated_oauth_incidents.sql",
+  "20260730061940_create_weekly_plan_observation.sql",
+  "20260730071422_add_observation_function_failure_probe.sql",
+  "20260808155145_allow_oauth_auth_failure_incident.sql",
+  "20260808155225_record_unauthenticated_oauth_incidents.sql",
 ];
 const migrationPaths = migrationNames.map((name) =>
   fileURLToPath(new URL(`./${name}`, import.meta.url))

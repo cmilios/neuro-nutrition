@@ -275,12 +275,56 @@ Post-apply schema state, read back from the live project:
 | `is_privacy_limited_client_context` accepts the client's five-key payload | `true` |
 | `record_weekly_plan_client_incident` EXECUTE grants | `anon`, `authenticated` (not `public`) |
 
-Migration-history caveat: the MCP recorded these under generated versions
-`20260808155145` and `20260808155225` rather than the local filenames
-`20260805120000` and `20260808120000`. Realigning the history rows was blocked
-by a permission classifier. This is cosmetic — `supabase db push` was already
-unusable because of the three pre-existing mismatches noted in finding 2 — but
-it does add two more entries to that reconciliation backlog.
+Migration-history caveat, since resolved (see below): the MCP recorded these
+under generated versions `20260808155145` and `20260808155225` rather than the
+local filenames `20260805120000` and `20260808120000`. Realigning the history
+rows via direct `UPDATE` was blocked by a permission classifier. This was
+cosmetic — `supabase db push` was already unusable because of the three
+pre-existing mismatches noted in finding 2 — but it added two more entries to
+that reconciliation backlog.
+
+### Migration history reconciliation (2026-08-08)
+
+All five mismatched rows (three pre-existing plus the two above) were
+reconciled by **renaming the local migration files to the applied remote
+versions**, rather than mutating `supabase_migrations.schema_migrations` on the
+live project. This was a deliberate choice between two options considered:
+`supabase migration repair --status applied/reverted <version>` against the
+linked project, or the rename performed here. Repair is the more idiomatic
+tool, but every mistake in it is a write against production bookkeeping — and
+in this specific case, a wrong repair state could cause the next `db push` to
+retry the first migration's `create table ... weekly_plan_client_incidents`,
+which is not idempotent and would fail exactly as finding 2 described.
+Renaming touches only local files and a test's expected-name list; a mistake
+is caught by the test suite or a `db push --dry-run` before it ever reaches
+Supabase, and never has a path to writing anything to the production project.
+Operator approved this route on 2026-08-08.
+
+| Old local filename | New local filename (= applied remote version) |
+| --- | --- |
+| `20260729120000_create_weekly_plan_observation.sql` | `20260730061940_create_weekly_plan_observation.sql` |
+| `20260729135108_create_health_profile_plan_replacement_commands.sql` | `20260730062107_create_health_profile_plan_replacement_commands.sql` |
+| `20260730071049_add_observation_function_failure_probe.sql` | `20260730071422_add_observation_function_failure_probe.sql` |
+| `20260805120000_allow_oauth_auth_failure_incident.sql` | `20260808155145_allow_oauth_auth_failure_incident.sql` |
+| `20260808120000_record_unauthenticated_oauth_incidents.sql` | `20260808155225_record_unauthenticated_oauth_incidents.sql` |
+
+Every reference to the old filenames was updated: the `migrationNames` /
+`migrations` arrays in `supabase/migrations/weekly_plan_observation.test.ts`
+and `supabase/migrations/health_profile_plan_replacement_commands.test.ts`, an
+internal comment in `20260808155225_record_unauthenticated_oauth_incidents.sql`
+naming its sibling migration, and filename mentions in `DEPLOYMENT.md` and
+`release/README.md`. SQL contents of all five files are unchanged — only the
+version prefix moved.
+
+The historical version numbers quoted earlier in this record (in finding 2 and
+in the "Applied to project" section above) describe the mismatch as it stood
+at promotion time and are left as written; they now refer to files that have
+since been renamed per the table above.
+
+Verified after the rename: `npx vitest run --no-file-parallelism` → 306/306 in
+44/44 files, `npm run typecheck` clean, `npm run build` clean, and
+`supabase db push --dry-run` (linked to `cmayisxvronrwvzhyuer`) reports no
+pending migrations.
 
 ### Live incident-channel health check
 

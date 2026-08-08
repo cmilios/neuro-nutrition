@@ -18,8 +18,8 @@ const migrations = [
   "./20260727177500_enter_weekly_plan_maintenance.sql",
   "./20260727180000_cut_over_legacy_weekly_plans.sql",
   "./20260727180100_finalize_legacy_weekly_plan_cutover.sql",
-  "./20260729120000_create_weekly_plan_observation.sql",
-  "./20260729135108_create_health_profile_plan_replacement_commands.sql",
+  "./20260730061940_create_weekly_plan_observation.sql",
+  "./20260730062107_create_health_profile_plan_replacement_commands.sql",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 
 const userId = "00000000-0000-4000-8000-000000000001";
