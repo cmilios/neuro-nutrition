@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { weeklyPlanFixture } from "../../test/weeklyPlanFixture";
+import { CLIENT_INCIDENT_CONTEXT_KEYS } from "../../services/clientIncidentContext";
 
 const migrationNames = [
   "20260722091747_user_data.sql",
@@ -21,6 +22,7 @@ const migrationNames = [
   "20260729120000_create_weekly_plan_observation.sql",
   "20260730071049_add_observation_function_failure_probe.sql",
   "20260805120000_allow_oauth_auth_failure_incident.sql",
+  "20260808120000_record_unauthenticated_oauth_incidents.sql",
 ];
 const migrationPaths = migrationNames.map((name) =>
   fileURLToPath(new URL(`./${name}`, import.meta.url))
@@ -73,11 +75,19 @@ describe("Weekly Plan observation database contract", () => {
     );
     expect(incidents.rows[0].count).toBe(1);
 
+    // Built from the client's own contract rather than hand-written, so a key
+    // added on either side without the other fails here instead of silently
+    // losing incidents in production.
+    const fullContext = JSON.stringify(
+      Object.fromEntries(
+        CLIENT_INCIDENT_CONTEXT_KEYS.map((key) => [key, "sample-value"]),
+      ),
+    );
     await database.exec(`
       set role authenticated;
       select public.record_weekly_plan_client_incident(
         'oauth_auth_failure',
-        '{"provider":"google","phase":"session_restore","errorCode":"unverified_email"}'
+        '${fullContext}'
       );
       reset role;
     `);
@@ -102,6 +112,56 @@ describe("Weekly Plan observation database contract", () => {
       );
     `)).rejects.toThrow();
     await database.exec("reset role;");
+  });
+
+  it("records signed-out OAuth failures and nothing else anonymously", async () => {
+    // The callback, session-restore and redirect-start failures all report with
+    // no session, so `anon` must be able to record them unattributed.
+    await database.exec(`
+      select set_config('request.jwt.claim.sub', '', false);
+      set role anon;
+      select public.record_weekly_plan_client_incident(
+        'oauth_auth_failure',
+        '{"provider":"google","lifecycleStage":"callback","errorCode":"oauth_callback_failed"}'
+      );
+      reset role;
+    `);
+    const anonymous = await database.query<{ count: number }>(`
+      select count(*)::integer as count
+      from public.weekly_plan_client_incidents
+      where user_id is null and event_type = 'oauth_auth_failure'
+    `);
+    expect(anonymous.rows[0].count).toBe(1);
+
+    // Every other event type still requires a session.
+    await expect(database.exec(`
+      set role anon;
+      select public.record_weekly_plan_client_incident(
+        'authoritative_load_failure',
+        '{"phase":"initial_load"}'
+      );
+    `)).rejects.toThrow(/Authentication is required/);
+    await database.exec("reset role;");
+
+    // The anonymous write path stays bounded.
+    await database.exec(`
+      insert into public.weekly_plan_client_incidents (user_id, event_type, context)
+      select null, 'oauth_auth_failure', '{}'::jsonb from generate_series(1, 120);
+      set role anon;
+      select public.record_weekly_plan_client_incident('oauth_auth_failure', '{}');
+      reset role;
+    `);
+    const capped = await database.query<{ count: number }>(`
+      select count(*)::integer as count
+      from public.weekly_plan_client_incidents
+      where user_id is null
+    `);
+    expect(capped.rows[0].count).toBe(121);
+
+    await database.exec(`
+      delete from public.weekly_plan_client_incidents where user_id is null;
+      select set_config('request.jwt.claim.sub', '${userId}', false);
+    `);
   });
 
   it("exposes an aggregate read-only snapshot to the monitor role", async () => {

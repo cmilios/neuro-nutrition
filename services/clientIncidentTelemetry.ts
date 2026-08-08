@@ -1,4 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  CLIENT_INCIDENT_CONTEXT_KEYS,
+  CLIENT_INCIDENT_VALUE_MAX_LENGTH,
+  type ClientIncidentContext,
+} from "./clientIncidentContext";
 import { supabase } from "./supabaseClient";
 
 export type ClientIncidentType =
@@ -11,35 +16,15 @@ export type ClientIncidentType =
   | "forced_reload_failure"
   | "oauth_auth_failure";
 
-export interface ClientIncidentContext {
-  provider?: string;
-  phase?: string;
-  lifecycleStage?: string;
-  operation?: string;
-  authorityStatus?: string;
-  errorCode?: string;
-  releaseIdentifier?: string;
-  timestamp?: string;
-}
-
-const CONTEXT_KEYS = [
-  "provider",
-  "phase",
-  "lifecycleStage",
-  "operation",
-  "authorityStatus",
-  "errorCode",
-  "releaseIdentifier",
-  "timestamp",
-] as const;
+export type { ClientIncidentContext };
 
 const privacyLimitedContext = (
   context: ClientIncidentContext,
 ): ClientIncidentContext => Object.fromEntries(
-  CONTEXT_KEYS.flatMap((key) => {
+  CLIENT_INCIDENT_CONTEXT_KEYS.flatMap((key) => {
     const value = context[key];
     return typeof value === "string" && value.length > 0
-      ? [[key, value.slice(0, 80)]]
+      ? [[key, value.slice(0, CLIENT_INCIDENT_VALUE_MAX_LENGTH)]]
       : [];
   }),
 );
