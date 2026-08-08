@@ -45,13 +45,13 @@ contract (matrix G2, G5).
 | # | Case | Outcome | Evidence |
 | --- | --- | --- | --- |
 | M1 | New sign-in | **Not run** | Requires a signed-out browser and a dedicated test Google account; operator-only. |
-| M2 | Returning sign-in | Not re-run here | Reported in a prior session against `27caf4b`. |
+| M2 | Returning sign-in | **Pass** | Auth logs 2026-08-08 show four separate `/authorize` → `/callback` → `login_method: oauth, provider: google` cycles for the same existing user, all `302`/success. |
 | M3 | Cancellation / denied consent | **Not run** | Operator-only. |
 | M4 | Session restoration across the real redirect | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M5 | Display Name handling | Not re-run here | Reported in a prior session against `27caf4b`. |
-| M6 | Account Security connected methods | **Fail** | Finding 6. Disconnect is broken for every multi-identity account. |
+| M6 | Account Security connected methods | **Pass** | Finding 6 found and fixed this session. After enabling manual linking, `DELETE /user/identities/…` returned `200` with an `identity_unlinked` audit event for `provider: google`. |
 | M7 | Logout then re-login | **Pass** | Auth logs 2026-08-08 show `logout` (204) followed 13s later by `/authorize` → `/callback` (302) and a `login_method: oauth, provider: google` for the same user. Derived from logs, not an observed UI run. |
-| M8 | Same-email automatic linking | Not re-run here | Reported in a prior session against `27caf4b`. |
+| M8 | Same-email automatic linking | **Pass** | Directly demonstrated 2026-08-08: the Google identity was unlinked (`200`), then a subsequent Google sign-in 31s later attached to the **same user id** rather than creating a second account. |
 | M9 | Apple private relay | `N/A` | Apple remains `off`. |
 | M10 | Email/password regression | **Not run** | Requires authenticating and registering in production; operator-only. |
 | M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. |
@@ -143,7 +143,7 @@ reaches any operator surface.
 provider messages appear in logs or browser code. Noted, not treated as a hard
 blocker; **not fixed**.
 
-### 6. Disconnecting a sign-in method is impossible — manual linking is disabled
+### 6. Disconnecting a sign-in method is impossible — manual linking is disabled — **resolved**
 
 Observed 2026-08-08 in the deployed app: signed in with Google on an account
 that also has a password, Account Security → Disconnect returned "The sign-in
@@ -171,9 +171,16 @@ tests at `components/UserProfileModal.test.tsx:116` and `:161` both pass,
 because they exercise the guard and the success path against a stubbed
 `onDisconnectSignInMethod` — no test asserts the server permits the call.
 
-Remediation: `enable_manual_linking = true` recorded in `supabase/config.toml`;
-the live project setting still has to be enabled by an operator. Not yet
-applied.
+Remediation: `enable_manual_linking = true` recorded in `supabase/config.toml`,
+and the live project setting was enabled by the operator on 2026-08-08. Auth
+logs show `reloading api with new configuration` at 16:34:25Z, and the next
+Disconnect at 16:35:37Z returned `200` with an `identity_unlinked` audit event.
+The same identity id that had failed five times succeeded. Resolved.
+
+Caveat carried forward: no automated test would catch a regression here. The
+existing unit tests stub `onDisconnectSignInMethod`, so a future project-setting
+change that disables manual linking again would be silent until a user hits it —
+exactly how this was found.
 
 ## Remediation (applied to production 2026-08-08)
 
