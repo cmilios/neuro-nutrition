@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -11,7 +16,8 @@
     "observation:check": "node release/observationMonitor.mjs",
     "observation:report": "node release/observationCli.mjs --input release/evidence/delivery-gate-input.json --out release/evidence/delivery-gate-report.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "docs:check": "node docs/check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.105.3",

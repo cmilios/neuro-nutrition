@@ -15,7 +15,7 @@ M10 accepted as documented partials. All six findings are now resolved; see
 Earlier revisions of this record were written against the pre-merge commit
 `0720be1`; the header above is the commit deployed at promotion, `3fb24d9`.
 Finding 5 and the migration history reconciliation (see
-[Finding 5](#5-raw-error-objects-reach-the-browser-console-on-oauth-paths---fixed)
+[Finding 5](#5-raw-error-objects-reach-the-browser-console-on-oauth-paths---fixed-and-deployed)
 below) shipped in a later deploy on the same day, commit
 `7aed2c63ae56f71039db4db07aec453574df4d56` (PR #67, merged 2026-08-08
 17:55:03Z), via the normal `main`-push deploy workflow — run `31270617295`,

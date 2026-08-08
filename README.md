@@ -1,37 +1,53 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# NeuroNutrition
 
-# Run and deploy your AI Studio app
+NeuroNutrition is an early-stage beta that uses AI-Assisted Meal Planning to
+create a personalized seven-day Weekly Plan from a user's Health Profile. A
+completed week's Meal Review can then shape the user's Next Weekly Plan.
 
-This contains everything you need to run your app locally.
+[Open the live beta](https://cmilios.github.io/neuro-nutrition/)
 
-View your app in AI Studio: https://ai.studio/apps/drive/1SJRjliEpFlLb4gzF7X53-CzE83yN-DPv
+## Safety boundary
 
-## Run Locally
+NeuroNutrition provides general meal-planning guidance. It is not medical
+advice, diagnosis, or treatment. People with medical dietary needs should
+consult a qualified clinician or dietitian. Allergy and dietary-restriction
+inputs do not guarantee ingredient safety, so users must verify ingredients
+independently.
 
-**Prerequisites:**  Node.js
+Because this is an early-stage beta, behavior and availability may change.
 
-1. Install dependencies:
-   `npm install`
-2. Ensure `.env.local` has `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-   (the OpenAI API key lives server-side in Supabase, not here).
-3. Run the app:
-   `npm run dev`  → http://localhost:3000/neuro-nutrition/
+## Five-minute quick start
 
-## Checks
+You need Node.js 20 and npm 10. The repository's committed lockfile is the
+installation source of truth.
 
-Run the automated checks alongside the production build:
+1. Clone this repository and enter its directory.
+2. Run `npm ci`.
+3. Copy `.env.example` to `.env.local`.
+4. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` for the
+   Supabase project you intend to use. These values are browser-visible
+   configuration; never put server secrets in a `VITE_*` variable.
+5. Run `npm run dev`, then open
+   `http://localhost:3000/neuro-nutrition/`.
 
-```bash
+Before proposing a change, run the project checks:
+
+```text
 npm test
 npm run typecheck
+npm run docs:check
 npm run build
 ```
 
-Use `npm test -- App.test.tsx` or
-`npm test -- supabase/functions/generate-meal-plan/handler.test.ts` to run one
-generation seam while iterating.
+## Documentation
 
-AI meal generation runs through a Supabase Edge Function that holds the OpenAI
-API key. See [DEPLOYMENT.md](DEPLOYMENT.md) for backend + hosting setup.
+- [Domain language and product concepts](CONTEXT.md)
+- [Deployment and local backend operations](DEPLOYMENT.md)
+- [OAuth verification matrix](docs/oauth/verification-matrix.md)
+- [OAuth release checklist](docs/oauth/release-checklist.md)
+- [Apple credential-rotation runbook](docs/oauth/apple-rotation-runbook.md)
+- [Architectural decisions](docs/adr/)
+
+Detailed setup, release, and OAuth procedures belong to the linked documents;
+this landing page stays focused on product orientation and the shortest local
+path.
