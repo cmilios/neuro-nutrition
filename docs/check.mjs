@@ -69,6 +69,12 @@ const normalizedDestination = (rawDestination) => {
   return trimmed.split(/\s+/, 1)[0];
 };
 
+const inlineMarkdownLinks = (text) =>
+  [...text.matchAll(/(!?)\[[^\]]*\]\(([^)]+)\)/g)].map((match) => ({
+    asset: match[1] === "!",
+    rawDestination: match[2],
+  }));
+
 const validateRequiredNavigation = async () => {
   const readme = path.join(root, "README.md");
   let contents;
@@ -80,8 +86,8 @@ const validateRequiredNavigation = async () => {
   }
 
   const destinations = new Set(
-    [...contents.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)].map((match) =>
-      normalizedDestination(match[1])
+    inlineMarkdownLinks(contents).map(({ rawDestination }) =>
+      normalizedDestination(rawDestination)
         .split(/[?#]/, 1)[0]
         .replaceAll("\\", "/"),
     ),
@@ -179,12 +185,12 @@ const validateNpmScripts = ({ document, text, lineNumber }) => {
 };
 
 const validateInlineMarkdown = async ({ document, text, lineNumber }) => {
-  for (const match of text.matchAll(/(!?)\[[^\]]*\]\(([^)]+)\)/g)) {
+  for (const { asset, rawDestination } of inlineMarkdownLinks(text)) {
     await validateLocalDestination({
       document,
       lineNumber,
-      rawDestination: match[2],
-      asset: match[1] === "!",
+      rawDestination,
+      asset,
     });
   }
 };
