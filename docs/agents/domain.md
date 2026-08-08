@@ -1,31 +1,38 @@
 # Domain Docs
 
-This repository uses the single-context documentation layout.
+How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-## Before exploring
+## Before exploring, read these
 
-Read these when they exist:
+- **`CONTEXT.md`** at the repo root — the glossary and domain overview.
+- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
 
-- `CONTEXT.md` at the repository root
-- Relevant ADRs under `docs/adr/`
+If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
-If they do not exist, proceed silently. Domain-modeling workflows create them when terminology or architectural decisions are resolved.
+## File structure
 
-## Layout
+This is a **single-context** repo — one `CONTEXT.md` and one `docs/adr/` at the root:
 
-```text
+```
 /
 ├── CONTEXT.md
 ├── docs/adr/
-└── components/, services/, supabase/
+│   └── 0001-record-per-user-ai-usage.md
+├── components/
+├── services/
+└── supabase/
 ```
 
-## Vocabulary
+If this repo ever splits into multiple bounded contexts, the layout becomes a root `CONTEXT-MAP.md` pointing at one `CONTEXT.md` per context, with context-scoped ADRs alongside each. Re-run `/setup-matt-pocock-skills` at that point rather than hand-editing this file.
 
-Use terminology defined in `CONTEXT.md`. Avoid introducing synonyms that conflict with its glossary.
+## Use the glossary's vocabulary
 
-If a needed concept is absent, reconsider whether it reflects the project’s language or note it for domain modeling.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
 
-## ADR conflicts
+If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 
-If a change contradicts an existing ADR, surface the conflict explicitly instead of silently overriding the decision.
+## Flag ADR conflicts
+
+If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
+
+> _Contradicts ADR-0001 (record per-user AI usage) — but worth reopening because…_
