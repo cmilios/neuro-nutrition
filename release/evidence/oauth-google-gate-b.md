@@ -10,8 +10,9 @@ backed by [docs/oauth/verification-matrix.md](../../docs/oauth/verification-matr
 
 **Status: PROMOTED to `on` 2026-08-08**, on operator authorisation with M1 and
 M10 accepted as documented partials. Findings 1–4 and 6 are resolved and
-verified in production; finding 5 remains open and unfixed. See
-[Findings](#blocking-findings) and [Promotion](#promotion).
+verified in production. Finding 5 is fixed in code (not yet merged to `main`
+or deployed as of this writing — see [Finding 5](#5-raw-error-objects-reach-the-browser-console-on-oauth-paths---fixed-not-yet-deployed)).
+See [Findings](#blocking-findings) and [Promotion](#promotion).
 
 Earlier revisions of this record were written against the pre-merge commit
 `0720be1`; the header above is the commit actually deployed at promotion.
@@ -71,7 +72,7 @@ observation is the evidence that gating worked before the gate was opened.
 | M8 | Same-email automatic linking | **Pass** | Directly demonstrated 2026-08-08: the Google identity was unlinked (`200`), then a subsequent Google sign-in 31s later attached to the **same user id** rather than creating a second account. |
 | M9 | Apple private relay | `N/A` | Apple remains `off`. |
 | M10 | Email/password regression | **Partial — accepted** | Registration verified in production (see below). Change-password and recovery deliberately not run; operator accepted 2026-08-08. |
-| M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. |
+| M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. At promotion time this Pass covered the stored-incident payload only, not the browser console — see finding 5, fixed in code post-promotion but not yet deployed. |
 | M12 | Incident-channel health check | **Pass** | Live end-to-end check against production with the anon key, 2026-08-08 — see [Live incident-channel health check](#live-incident-channel-health-check). |
 | M13 | Monitoring | **Running** | Mechanism verified pre-promotion: the observation snapshot classified a live `oauth_auth_failure` as `critical`. Baseline captured at promotion and the 24h watch started — see [M13 monitoring](#m13-monitoring). |
 
@@ -153,12 +154,43 @@ Findings 1–4 compound into a silent loss: RPC rejects → `console.warn` in th
 end user's own browser → `alertOperator` no-ops → incident discarded. Nothing
 reaches any operator surface.
 
-### 5. Raw error objects reach the browser console on OAuth paths
+### 5. Raw error objects reach the browser console on OAuth paths — fixed, not yet deployed
 
-`App.tsx:393` and `App.tsx:696` log raw Supabase/provider error objects via
+`App.tsx:393` and `App.tsx:696` logged raw Supabase/provider error objects via
 `console.error`. Client-side only and not exfiltrated, but M11 asks that no raw
 provider messages appear in logs or browser code. Noted, not treated as a hard
-blocker; **not fixed**.
+blocker, at promotion time.
+
+**Fix.** Both call sites now log the stable `errorCode` string already computed
+at that site for `reportOAuthFailure` (`session_restore_failed` and
+`redirect_start_failed` respectively) instead of the caught error object. The
+now-unused caught-error bindings (`catch (sessionError)`, `catch (oauthError)`)
+were removed rather than kept and ignored.
+
+**Scope decision: narrow, not general.** The same
+`console.error(message, rawError)` pattern exists at twelve other sites in
+`App.tsx` (non-OAuth: profile/plan loading, logout, meal-reroll and generation
+command paths). Only the two named sites sit on an OAuth failure path, which is
+M11's stated scope (`each | failure paths`, scoped per-provider in the
+verification matrix — not a codebase-wide console-hygiene rule). Fixing all
+fourteen would be a broader logging-policy change than the matrix asked for and
+was out of scope for this finding; it's left as a candidate follow-up if the
+project wants that as a general rule rather than an OAuth-specific one.
+
+**Regression tests.** Extended the two existing tests that already exercise
+these exact failure paths end-to-end, rather than adding a new isolated test:
+`App.sessionRestore.test.tsx` ("returns to Log In with a retryable message when
+session restoration fails") and `App.oauth.test.tsx` ("returns to Log In with a
+retryable toast when %s redirect setup fails"). Each now asserts
+`console.error` was called with the stable code and that the raw injected error
+message (`"provider details must stay private"` / `"provider unreachable"`)
+never appears anywhere in the mock's recorded call arguments.
+
+**Verification:** `npx vitest run --no-file-parallelism` → 306/306 in 44/44
+files (unchanged counts — assertions were added to existing tests, not new
+ones), `npm run typecheck` clean, `npm run build` clean. Not yet merged to
+`main` or deployed; the browser-console behavior above is verified by the
+regression tests, not by a live check against production.
 
 ### 6. Disconnecting a sign-in method is impossible — manual linking is disabled — **resolved**
 
@@ -406,7 +438,9 @@ settling the parallel-load flakiness recorded under Gate A.
 
 **Still required and not done:** setting the `VITE_CLIENT_INCIDENT_ALERT_URL`
 secret to the deployed function URL and redeploying Pages so the build inlines
-it; finding 5; and the operator-only manual cases M1, M3, M7, M10.
+it; merging and deploying the finding 5 fix (see
+[Finding 5](#5-raw-error-objects-reach-the-browser-console-on-oauth-paths---fixed-not-yet-deployed));
+and the operator-only manual cases M1, M3, M7, M10.
 
 ## Non-blocking observations
 

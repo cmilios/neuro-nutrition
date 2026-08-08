@@ -313,7 +313,7 @@ describe("post-redirect session restore", () => {
   it("returns to Log In with a retryable message when session restoration fails", async () => {
     sessionStorage.setItem("neuronutrition.oauth-initiating-provider", "google");
     getSession.mockRejectedValue(new Error("provider details must stay private"));
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     render(<App />);
 
@@ -331,6 +331,15 @@ describe("post-redirect session restore", () => {
       timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
     expect(JSON.stringify(reportClientIncident.mock.calls)).not.toContain(
+      "provider details must stay private",
+    );
+    // M11 / finding 5: the browser console must carry the stable error code,
+    // never the raw provider/Supabase error object or its message.
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to restore session:",
+      "session_restore_failed",
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(
       "provider details must stay private",
     );
   });
