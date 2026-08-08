@@ -125,7 +125,7 @@ Three of the five OAuth failure paths run with no session, so all three hit
 this: `App.tsx:382` (`oauth_callback_failed`), `App.tsx:399`
 (`session_restore_failed`), `App.tsx:700` (`redirect_start_failed`).
 
-### 4. The operator-alert fallback is unconfigured in production
+### 4. The operator-alert fallback is unconfigured in production — **receiver deployed, secret pending**
 
 When the RPC fails, `clientIncidentTelemetry.ts` falls back to `alertOperator`,
 which reads `VITE_CLIENT_INCIDENT_ALERT_URL` and returns immediately if unset.
@@ -215,9 +215,42 @@ The negative cases matter as much as the positive one: granting `anon` execute
 did not widen the write path beyond OAuth failures, and did not weaken the
 privacy filter.
 
+### Fallback receiver (finding 4)
+
+`client-incident-alert` was deployed to the same project on 2026-08-08 and
+verified live. It logs rather than writing to `weekly_plan_client_incidents`,
+deliberately: the failure it exists to catch is that table refusing writes, so a
+fallback that depended on it would be no fallback at all.
+
+It is necessarily anonymous — `sendBeacon` cannot set an Authorization header —
+so the payload is treated as hostile. Verified against the deployed endpoint:
+
+| Case | Result |
+| --- | --- |
+| `OPTIONS` preflight from `https://cmilios.github.io` | `204` with the expected allow-origin/headers/methods |
+| Valid alert, no Authorization header | `204` — confirms `verify_jwt` is off |
+| `failedEvent` shaped like an access token | `400` `malformed_payload` |
+| Body that is not JSON | `400` `malformed_payload` |
+| Body over 1 KB | `413` `payload_too_large` |
+| `POST` from an unrecognised origin | no `access-control-allow-origin` granted |
+| `GET` | `405` `method_not_allowed` |
+
+Only three validated fields survive into the log, and no part of the request is
+echoed back, so an anonymous caller cannot write free text or personal data into
+the operator's logs. The per-minute cap and the log emission itself are covered
+by unit tests (8 cases in `handler.test.ts`) rather than exercised against
+production, to avoid flooding it.
+
+**Not verified:** that the emitted line is visible on the operator's log
+surface. The MCP `get_logs` edge-function view returned only request-level
+entries, no `console` output for any function, and lagged behind these calls.
+The handler-to-log boundary is unit-tested and the wiring is a single
+`console.warn`, but the last hop is unconfirmed and should be eyeballed on the
+dashboard before the fallback is relied on.
+
 **Still required and not done:** setting the `VITE_CLIENT_INCIDENT_ALERT_URL`
-secret (finding 4), finding 5, and the operator-only manual cases M1, M3, M7,
-M10.
+secret to the deployed function URL and redeploying Pages so the build inlines
+it; finding 5; and the operator-only manual cases M1, M3, M7, M10.
 
 ## Non-blocking observations
 
