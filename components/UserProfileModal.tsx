@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   KeyRound,
   LogOut,
+  Mail,
   Monitor,
   Moon,
   Palette,
@@ -26,6 +27,7 @@ import {
   type ThemePreference,
 } from '../services/theme';
 import type { ConnectedSignInMethod } from '../services/authService';
+import GoogleIcon from './GoogleIcon';
 import {
   getProviderMode,
   type OAuthProvider,
@@ -68,18 +70,40 @@ const sections: Array<{
 const focusableSelector =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
-const providerNames: Record<string, string> = {
-  apple: 'Apple',
-  email: 'Email/password',
-  google: 'Google',
+type ProviderPresentation = {
+  name: string;
+  icon?: React.ComponentType<{
+    className?: string;
+    size?: number;
+  }>;
+  iconClassName?: string;
+  oauthProvider?: OAuthProvider;
+};
+
+const providerPresentations: Record<string, ProviderPresentation> = {
+  apple: { name: 'Apple', oauthProvider: 'apple' },
+  email: { name: 'Email/password', icon: Mail, iconClassName: 'text-slate-500' },
+  google: { name: 'Google', icon: GoogleIcon, oauthProvider: 'google' },
 };
 
 const getProviderName = (provider: string): string =>
-  providerNames[provider]
+  providerPresentations[provider]?.name
   ?? provider.charAt(0).toUpperCase() + provider.slice(1);
 
 const isOAuthProvider = (provider: string): provider is OAuthProvider =>
-  provider === 'google' || provider === 'apple';
+  providerPresentations[provider]?.oauthProvider === provider;
+
+const SignInMethodIcon: React.FC<{ provider: string }> = ({ provider }) => {
+  const presentation = providerPresentations[provider];
+  const Icon = presentation?.icon;
+  return Icon
+    ? (
+      <span aria-hidden="true">
+        <Icon className={presentation.iconClassName} size={22} />
+      </span>
+    )
+    : null;
+};
 
 const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
@@ -675,15 +699,18 @@ const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               && getProviderMode(method.provider) === 'off';
                             return (
                               <li key={method.identityId} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 p-3">
-                                <span>
-                                  <span className="block text-sm font-semibold text-slate-800">
-                                    {getProviderName(method.provider)}
-                                  </span>
-                                  {providerUnavailable && (
-                                    <span className="mt-0.5 block text-xs font-semibold text-amber-700">
-                                      Sign-in temporarily unavailable
+                                <span className="flex min-w-0 items-center gap-3">
+                                  <SignInMethodIcon provider={method.provider} />
+                                  <span>
+                                    <span className="block text-sm font-semibold text-slate-800">
+                                      {getProviderName(method.provider)}
                                     </span>
-                                  )}
+                                    {providerUnavailable && (
+                                      <span className="mt-0.5 block text-xs font-semibold text-amber-700">
+                                        Sign-in temporarily unavailable
+                                      </span>
+                                    )}
+                                  </span>
                                 </span>
                                 <button
                                   type="button"

@@ -6,6 +6,7 @@ import {
   type OAuthProvider,
 } from '../services/oauthProviderFlagsService';
 import { Leaf, Mail, Lock, User as UserIcon, ArrowRight, Loader2 } from 'lucide-react';
+import GoogleIcon from './GoogleIcon';
 
 interface AuthScreenProps {
   onSuccess: (user: User) => void;
@@ -37,6 +38,7 @@ const ProviderButton: React.FC<{
     onClick={() => onSelect?.(provider)}
     className={`w-full flex items-center justify-center gap-3 rounded-xl border py-3 font-semibold transition-all hover:-translate-y-0.5 ${providerButtonPalette[provider]}`}
   >
+    {provider === 'google' && <GoogleIcon />}
     {label}
   </button>
 );
