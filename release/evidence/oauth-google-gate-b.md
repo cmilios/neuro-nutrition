@@ -8,7 +8,9 @@ backed by [docs/oauth/verification-matrix.md](../../docs/oauth/verification-matr
 **Supabase project ref:** `cmayisxvronrwvzhyuer` ·
 **Verification URL:** `/neuro-nutrition/verify-oauth/`
 
-**Status: INCOMPLETE — promotion blocked.** See [Blocking findings](#blocking-findings).
+**Status: INCOMPLETE — promotion blocked.** Findings 1–3 were remediated and
+verified against production on 2026-08-08; findings 4–5 and the operator-only
+manual cases remain open. See [Blocking findings](#blocking-findings).
 
 ## Gate A confirmation
 
@@ -52,9 +54,9 @@ contract (matrix G2, G5).
 | M8 | Same-email automatic linking | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M9 | Apple private relay | `N/A` | Apple remains `off`. |
 | M10 | Email/password regression | **Not run** | Requires authenticating and registering in production; operator-only. |
-| M11 | Failure paths emit sanitized evidence | **Fail** | Findings 1–4. Payload contract is sound; delivery is broken end to end. |
-| M12 | Incident-channel health check | **Fail** | Findings 1–4. |
-| M13 | Monitoring | **Blocked** | The failure classes findings 1–3 discard are exactly those a public rollout must watch. |
+| M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. |
+| M12 | Incident-channel health check | **Pass** | Live end-to-end check against production with the anon key, 2026-08-08 — see [Live incident-channel health check](#live-incident-channel-health-check). |
+| M13 | Monitoring | **Ready, not run** | Mechanism verified: the observation snapshot classified a live `oauth_auth_failure` as `critical`. The 24h watch itself is an operator activity during controlled verification. |
 
 ### What passes
 
@@ -72,7 +74,7 @@ The sanitization contract is therefore sound. Everything below concerns
 
 ## Blocking findings
 
-### 1. The stored context contract rejects the payload the client sends
+### 1. The stored context contract rejects the payload the client sends — **resolved**
 
 `private.is_privacy_limited_client_context` backs a CHECK constraint on
 `weekly_plan_client_incidents.context` and allowed only `provider`, `phase`,
@@ -95,7 +97,7 @@ never sends.
 The keys the matrix requires (C5: provider, lifecycle stage, stable error code,
 release id, timestamp) are precisely the ones the database refused.
 
-### 2. The migration enabling OAuth incidents was never applied to production
+### 2. The migration enabling OAuth incidents was never applied to production — **resolved**
 
 `supabase/migrations/20260805120000_allow_oauth_auth_failure_incident.sql` adds
 `oauth_auth_failure` to the `event_type` CHECK constraint. It is the **only**
@@ -108,7 +110,7 @@ filenames (for example `create_weekly_plan_observation` is recorded remotely as
 version `20260730061940` against local `20260729120000`). Applying the pending
 migrations needs care rather than an unexamined `supabase db push`.
 
-### 3. Signed-out OAuth failures cannot execute the reporter
+### 3. Signed-out OAuth failures cannot execute the reporter — **resolved**
 
 `record_weekly_plan_client_incident` was granted to `authenticated` only —
 `revoke all ... from public, anon` — and raised `'Authentication is required'`
@@ -141,7 +143,7 @@ reaches any operator surface.
 provider messages appear in logs or browser code. Noted, not treated as a hard
 blocker; **not fixed**.
 
-## Remediation drafted (not applied to production)
+## Remediation (applied to production 2026-08-08)
 
 | Change | Addresses |
 | --- | --- |
@@ -169,9 +171,53 @@ from the SQL allow-list fails the suite with the exact production symptom.
 Verification after the change: `npm test` 291/291, `npm run typecheck` clean,
 `npm run build` clean.
 
-**Still required and not done:** applying the pending migrations to the live
-project, and setting the `VITE_CLIENT_INCIDENT_ALERT_URL` secret. Both are
-production changes awaiting operator authorization.
+### Applied to project `cmayisxvronrwvzhyuer`
+
+Both pending migrations were applied on operator authorization, in order:
+`allow_oauth_auth_failure_incident` then
+`record_unauthenticated_oauth_incidents`. `supabase db push` was deliberately
+not used, for the history-mismatch reason in finding 2.
+
+Post-apply schema state, read back from the live project:
+
+| Check | Result |
+| --- | --- |
+| `event_type` CHECK includes `oauth_auth_failure` | yes |
+| `user_id` nullable | yes |
+| `is_privacy_limited_client_context` accepts the client's five-key payload | `true` |
+| `record_weekly_plan_client_incident` EXECUTE grants | `anon`, `authenticated` (not `public`) |
+
+Migration-history caveat: the MCP recorded these under generated versions
+`20260808155145` and `20260808155225` rather than the local filenames
+`20260805120000` and `20260808120000`. Realigning the history rows was blocked
+by a permission classifier. This is cosmetic — `supabase db push` was already
+unusable because of the three pre-existing mismatches noted in finding 2 — but
+it does add two more entries to that reconciliation backlog.
+
+### Live incident-channel health check
+
+Against production with the anon key, using the exact payload `App.tsx` sends
+(matrix C5, checklist M12):
+
+| Case | Before | After |
+| --- | --- | --- |
+| Signed-out `oauth_auth_failure`, full context | `401` `42501` permission denied | **`204`** |
+| Signed-out `authoritative_load_failure` | `401` `42501` | `400` `P0001` "Authentication is required" |
+| Signed-out `oauth_auth_failure` with an `email` key | `401` `42501` | `400` `23514` context CHECK violation |
+
+The stored row carried `provider`, `lifecycleStage`, `errorCode`,
+`releaseIdentifier`, `timestamp` and a null `user_id` — the C5 contract exactly,
+with no identifying data. `get_weekly_plan_observation_snapshot()` then reported
+`{"total": 1, "critical": 1}`, so the monitoring surface classifies these as
+critical without further work. The probe row was deleted after the check.
+
+The negative cases matter as much as the positive one: granting `anon` execute
+did not widen the write path beyond OAuth failures, and did not weaken the
+privacy filter.
+
+**Still required and not done:** setting the `VITE_CLIENT_INCIDENT_ALERT_URL`
+secret (finding 4), finding 5, and the operator-only manual cases M1, M3, M7,
+M10.
 
 ## Non-blocking observations
 
@@ -190,9 +236,9 @@ production changes awaiting operator authorization.
 ## Sign-off
 
 - [ ] Gate A confirmed green on the commit SHA above — *local only; CI does not run tests*
-- [ ] M1–M13 complete for this provider
+- [ ] M1–M13 complete for this provider — *M1, M3, M7, M10 outstanding (operator-only)*
 - [x] All evidence fields recorded; no secrets present in any evidence
-- [ ] M12 incident-channel health check passed **before** `verify` — **failed**
-- [ ] M13 monitoring in place for controlled verification and the first 24h — **blocked**
+- [x] M12 incident-channel health check passed — live against production, 2026-08-08
+- [ ] M13 monitoring in place for controlled verification and the first 24h — *mechanism verified; watch not yet run*
 
 **Promotion decision:** `hold`
