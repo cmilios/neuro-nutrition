@@ -46,7 +46,7 @@ contract (matrix G2, G5).
 | --- | --- | --- | --- |
 | M1 | New sign-in | **Not run** | Requires a signed-out browser and a dedicated test Google account; operator-only. |
 | M2 | Returning sign-in | **Pass** | Auth logs 2026-08-08 show four separate `/authorize` → `/callback` → `login_method: oauth, provider: google` cycles for the same existing user, all `302`/success. |
-| M3 | Cancellation / denied consent | **Not run** | Operator-only. |
+| M3 | Cancellation / denied consent | **Pass** | Operator cancelled at Google's consent screen 2026-08-08; the app recovered with no error state. `weekly_plan_client_incidents` holds zero `oauth_auth_failure` rows, so cancellation was correctly not treated as a failure (matrix C2). |
 | M4 | Session restoration across the real redirect | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M5 | Display Name handling | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M6 | Account Security connected methods | **Pass** | Finding 6 found and fixed this session. After enabling manual linking, `DELETE /user/identities/…` returned `200` with an `identity_unlinked` audit event for `provider: google`. |
@@ -253,6 +253,20 @@ critical without further work. The probe row was deleted after the check.
 The negative cases matter as much as the positive one: granting `anon` execute
 did not widen the write path beyond OAuth failures, and did not weaken the
 privacy filter.
+
+### Why the incident count is now interpretable
+
+After the operator's manual runs on 2026-08-08 — four Google sign-ins, a logout
+cycle, an identity unlink, and a cancelled consent — `weekly_plan_client_incidents`
+holds **zero** `oauth_auth_failure` rows.
+
+That zero is only meaningful because delivery was proven first. Before the fix
+the count was structurally pinned at zero: every insert was rejected, so a
+healthy system and a completely broken one produced identical readings. Having
+demonstrated that a real payload does reach the table and is classified
+`critical`, a zero now genuinely means no failures occurred. This is the
+condition M13's watch depends on — without it, monitoring a count that cannot
+rise is theatre.
 
 ### Fallback receiver (finding 4)
 
