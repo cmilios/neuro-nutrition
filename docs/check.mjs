@@ -112,6 +112,11 @@ const validateRequiredNavigation = async () => {
 
 const requiredWikiPages = ["Home.md", "Getting-Started.md", "_Sidebar.md"];
 const representativeWikiAsset = "assets/weekly-plan-overview.png";
+const publishedWikiPages = new Map([
+  ["https://github.com/cmilios/neuro-nutrition/wiki", "Home.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Home", "Home.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started", "Getting-Started.md"],
+]);
 
 const readRequiredFile = async (file, contract, message) => {
   try {
@@ -124,7 +129,9 @@ const readRequiredFile = async (file, contract, message) => {
 
 const markdownDestinations = (contents) =>
   inlineMarkdownLinks(contents).map((link) => ({
-    destination: normalizedLocalDestination(link.rawDestination),
+    destination: publishedWikiPages.get(
+      normalizedDestination(link.rawDestination).split(/[?#]/, 1)[0].replace(/\/$/, ""),
+    ) ?? normalizedLocalDestination(link.rawDestination),
     lineNumber: link.lineNumber,
     alt: link.alt,
   }));

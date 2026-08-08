@@ -1,2 +1,2 @@
-- [Home](Home.md)
-- [Getting Started](Getting-Started.md)
+- [Home](https://github.com/cmilios/neuro-nutrition/wiki)
+- [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)

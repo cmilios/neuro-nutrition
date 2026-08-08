@@ -4,7 +4,7 @@ _For people using the NeuroNutrition beta. This page explains what the product
 does, its safety limits, and where to begin._
 
 [Open the NeuroNutrition beta](https://cmilios.github.io/neuro-nutrition/) ·
-[Get started](Getting-Started.md)
+[Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
 
 NeuroNutrition uses AI-Assisted Meal Planning to propose a seven-day Weekly Plan
 from your Health Profile. The beta is still changing, so features and
@@ -48,7 +48,8 @@ The Apple Health control is an experimental demonstration in this beta. It does
 not connect to a real Apple Health account; enter and verify your details
 manually.
 
-Continue with the step-by-step [Getting Started guide](Getting-Started.md).
+Continue with the step-by-step
+[Getting Started guide](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started).
 
 ## Need to leave the app?
 

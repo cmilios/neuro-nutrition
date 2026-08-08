@@ -3,7 +3,7 @@
 _For first-time NeuroNutrition users. Follow these steps to create an account,
 complete a Health Profile, and generate a first Weekly Plan._
 
-[Return to the user-guide Home](Home.md)
+[Return to the user-guide Home](https://github.com/cmilios/neuro-nutrition/wiki)
 
 ## 1. Open the beta
 
@@ -72,4 +72,4 @@ available or [contact support](https://github.com/cmilios/neuro-nutrition/issues
 for account-access help. Never post a password, recovery link, email address, or
 other private account information in a public issue.
 
-[Return to the user-guide Home](Home.md)
+[Return to the user-guide Home](https://github.com/cmilios/neuro-nutrition/wiki)
