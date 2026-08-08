@@ -72,10 +72,12 @@ jobs:
           set -euo pipefail
           home_url="https://github.com/${GITHUB_REPOSITORY}/wiki"
           getting_started_url="https://github.com/${GITHUB_REPOSITORY}/wiki/Getting-Started"
+          privacy_url="https://github.com/${GITHUB_REPOSITORY}/wiki/Privacy-and-Safety"
           asset_url="https://raw.githubusercontent.com/wiki/${GITHUB_REPOSITORY}/assets/weekly-plan-overview.png"
           for attempt in 1 2 3 4 5 6; do
             if home_html="$(curl --fail --location --silent --show-error "$home_url")" \
               && getting_started_html="$(curl --fail --location --silent --show-error "$getting_started_url")" \
+              && privacy_html="$(curl --fail --location --silent --show-error "$privacy_url")" \
               && curl --fail --location --silent --show-error --output /dev/null "$asset_url"; then
               break
             fi
@@ -95,3 +97,7 @@ jobs:
             || { echo "::error title=Rendered Wiki formatting missing::Getting Started heading did not render."; exit 1; }
           grep --extended-regexp --quiet 'href="https://github.com/cmilios/neuro-nutrition/wiki"' <<<"$getting_started_html" \
             || { echo "::error title=Rendered Wiki navigation missing::Getting Started does not link back to Home."; exit 1; }
+          grep --extended-regexp --quiet '<h1[^>]*>.*Privacy and Safety.*</h1>' <<<"$privacy_html" \
+            || { echo "::error title=Rendered Wiki formatting missing::Privacy and Safety heading did not render."; exit 1; }
+          grep --extended-regexp --quiet 'href="https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md"' <<<"$privacy_html" \
+            || { echo "::error title=Rendered Wiki source link missing::Privacy and Safety does not link to the technical source."; exit 1; }

@@ -1,2 +1,3 @@
 - [Home](https://github.com/cmilios/neuro-nutrition/wiki)
 - [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
+- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)

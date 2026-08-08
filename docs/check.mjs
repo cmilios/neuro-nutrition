@@ -98,7 +98,12 @@ const validateRequiredNavigation = async () => {
     ),
   );
 
-  for (const destination of ["docs/development.md", "CONTRIBUTING.md"]) {
+  for (const destination of [
+    "docs/development.md",
+    "CONTRIBUTING.md",
+    "docs/privacy-and-security.md",
+    "SECURITY.md",
+  ]) {
     if (!destinations.has(destination)) {
       reportFailure(
         readme,
@@ -110,12 +115,19 @@ const validateRequiredNavigation = async () => {
   }
 };
 
-const requiredWikiPages = ["Home.md", "Getting-Started.md", "_Sidebar.md"];
+const requiredWikiPages = [
+  "Home.md",
+  "Getting-Started.md",
+  "Privacy-and-Safety.md",
+  "_Sidebar.md",
+];
 const representativeWikiAsset = "assets/weekly-plan-overview.png";
+const technicalPrivacySource = "https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md";
 const publishedWikiPages = new Map([
   ["https://github.com/cmilios/neuro-nutrition/wiki", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Home", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started", "Getting-Started.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety", "Privacy-and-Safety.md"],
 ]);
 
 const readRequiredFile = async (file, contract, message) => {
@@ -158,9 +170,10 @@ const validateWikiBundle = async () => {
   );
 
   const navigationContract = [
-    ["Home.md", ["Getting-Started.md"]],
+    ["Home.md", ["Getting-Started.md", "Privacy-and-Safety.md"]],
     ["Getting-Started.md", ["Home.md"]],
-    ["_Sidebar.md", ["Home.md", "Getting-Started.md"]],
+    ["Privacy-and-Safety.md", ["Home.md", technicalPrivacySource]],
+    ["_Sidebar.md", ["Home.md", "Getting-Started.md", "Privacy-and-Safety.md"]],
   ];
   for (const [page, requiredDestinations] of navigationContract) {
     const contents = pages.get(page);
@@ -174,7 +187,9 @@ const validateWikiBundle = async () => {
           path.join(wikiRoot, page),
           1,
           "wiki-navigation",
-          `Wiki navigation must link to ${destination}`,
+          destination === technicalPrivacySource
+            ? "Wiki navigation must link to the technical privacy and security source"
+            : `Wiki navigation must link to ${destination}`,
         );
       }
     }
