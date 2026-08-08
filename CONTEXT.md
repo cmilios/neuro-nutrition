@@ -4,6 +4,10 @@ NeuroNutrition creates personalized meal plans and uses a completed week's exper
 
 ## Language
 
+**AI-Assisted Meal Planning**:
+The use of generative AI to propose general meal-planning guidance from a user's Health Profile. It is not medical advice, diagnosis, or treatment, and allergy or dietary-restriction inputs do not guarantee ingredient safety.
+_Avoid_: AI nutritionist, medical nutrition advice
+
 **Weekly Plan**:
 A seven-day set of breakfast, lunch, dinner, and snack meals tailored to the user's profile.
 _Avoid_: Menu, schedule
