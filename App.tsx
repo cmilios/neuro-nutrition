@@ -389,8 +389,12 @@ const App: React.FC = () => {
           window.history.replaceState({}, '', window.location.pathname);
         }
       })
-      .catch((sessionError) => {
-        console.error('Failed to restore session:', sessionError);
+      .catch(() => {
+        // Log the stable error code, not the raw provider/Supabase error
+        // object: this path runs on OAuth callbacks too, and M11 forbids raw
+        // provider text reaching the browser console.
+        const errorCode = 'session_restore_failed';
+        console.error('Failed to restore session:', errorCode);
         if (mounted) {
           if (oauthProvider) {
             setAuthenticationError(oauthFailureMessage(oauthProvider));
@@ -399,7 +403,7 @@ const App: React.FC = () => {
             reportOAuthFailure(
               oauthProvider,
               'session_restore',
-              'session_restore_failed',
+              errorCode,
             );
             clearPendingOAuth();
           } else {
@@ -689,15 +693,17 @@ const App: React.FC = () => {
       await authService.signInWithOAuth(provider);
       // On success the browser navigates to the provider and control does not
       // return; nothing else to do here.
-    } catch (oauthError) {
+    } catch {
       // The redirect could not be started. Return to the Log In screen so the
       // user can retry or use email/password instead of being stranded on the
-      // interstitial.
-      console.error('Could not start OAuth sign-in:', oauthError);
+      // interstitial. Log the stable error code, not the raw provider error
+      // object, per M11.
+      const errorCode = 'redirect_start_failed';
+      console.error('Could not start OAuth sign-in:', errorCode);
       setIsOAuthRedirecting(false);
       setAuthenticationError(oauthFailureMessage(provider));
       showOAuthToast(provider, 'error');
-      reportOAuthFailure(provider, 'redirect_start', 'redirect_start_failed');
+      reportOAuthFailure(provider, 'redirect_start', errorCode);
       clearPendingOAuth();
     }
   };

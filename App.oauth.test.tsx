@@ -138,6 +138,7 @@ describe("application OAuth redirect interstitial", () => {
     "returns to Log In with a retryable toast when %s redirect setup fails",
     async (provider) => {
     signInWithOAuth.mockRejectedValue(new Error("provider unreachable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     render(<App />);
 
     const providerButton = await screen.findByRole("button", {
@@ -163,5 +164,14 @@ describe("application OAuth redirect interstitial", () => {
     });
     expect(sessionStorage.getItem("neuronutrition.oauth-initiating-provider"))
       .toBeNull();
+    // M11 / finding 5: the browser console must carry the stable error code,
+    // never the raw provider error object or its message.
+    expect(consoleError).toHaveBeenCalledWith(
+      "Could not start OAuth sign-in:",
+      "redirect_start_failed",
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(
+      "provider unreachable",
+    );
   });
 });
