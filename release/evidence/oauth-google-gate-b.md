@@ -250,14 +250,32 @@ status is returned only after `recordAlert` runs.
 
 Because a log line is a pull surface that nobody polls — the project's actual
 monitoring path is `get_weekly_plan_observation_snapshot`, which a log line is
-not on — the receiver also forwards to a notification channel. The channel URL
-is a Supabase **function secret** (`CLIENT_INCIDENT_WEBHOOK_URL`), read
+not on — the receiver can also forward to a notification channel. The channel
+URL is a Supabase **function secret** (`CLIENT_INCIDENT_WEBHOOK_URL`), read
 server-side and never present in the client bundle; a `VITE_`-prefixed webhook
 would be inlined at build time and readable by anyone. Forwarding is
 best-effort: the log line is written first, the response never waits on the
 channel, and failures are reported as a closed set of codes rather than raw
 fetch errors, since a Deno network error can embed the request URL — which is
 the secret.
+
+**Operator decision, 2026-08-08: no channel is configured.**
+`CLIENT_INCIDENT_WEBHOOK_URL` is deliberately unset, which the forwarder
+supports — it no-ops and the log line remains the record. Accepted consequence:
+the organization is on the free plan, so function logs are retained about one
+day, and a delivery failure that nobody looks for within that window leaves no
+trace. This is a considered trade-off, not an outstanding gap.
+
+The residual risk this leaves is specific and worth stating plainly: if incident
+delivery breaks again, `clientIncidents.total` falls to zero, which is
+indistinguishable from a healthy system with no OAuth failures. Silence reads as
+health. That is how the faults above survived undetected. The mitigation that
+addresses the realistic cause — a context key added on one side and not the
+other — is the drift guard in `weekly_plan_observation.test.ts`, which prevents
+recurrence rather than reporting it. That guard only protects if the suite runs;
+`deploy.yml` runs no tests, so it currently depends on someone running
+`npm test` locally. Adding a CI test job is the higher-value follow-up, gated on
+settling the parallel-load flakiness recorded under Gate A.
 
 **Still required and not done:** setting the `VITE_CLIENT_INCIDENT_ALERT_URL`
 secret to the deployed function URL and redeploying Pages so the build inlines
