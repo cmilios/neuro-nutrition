@@ -268,6 +268,9 @@ const validateWikiPublication = async () => {
     [/GitHub Wiki target unavailable/i, "Workflow needs a target-unavailable diagnostic"],
     [/\bdocs\/wiki\//, "Workflow must publish the repository-authored Wiki source"],
     [/Inspect rendered Wiki/i, "Workflow must inspect the rendered Wiki after publication"],
+    [/Using-Your-Weekly-Plan/, "Workflow must inspect Using Your Weekly Plan after publication"],
+    [/Reviewing-Your-Week/, "Workflow must inspect Reviewing Your Week after publication"],
+    [/Start-Over/, "Workflow must inspect Start Over after publication"],
   ];
 
   for (const [pattern, message] of contracts) {

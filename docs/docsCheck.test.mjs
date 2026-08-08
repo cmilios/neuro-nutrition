@@ -263,3 +263,15 @@ test("the Wiki publication workflow carries the recovery and safety contract", a
     /inspect the rendered Wiki/i,
   );
 });
+
+test("the Wiki publication workflow inspects every Weekly Plan journey page", async () => {
+  await expectContractFailure(
+    {
+      ".github/workflows/publish-wiki.yml": baseFixture[".github/workflows/publish-wiki.yml"],
+    },
+    /\.github\/workflows\/publish-wiki\.yml:1 \[wiki-publication\]/,
+    /Using Your Weekly Plan/i,
+    /Reviewing Your Week/i,
+    /Start Over/i,
+  );
+});
