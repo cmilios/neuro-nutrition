@@ -10,7 +10,7 @@ NeuroNutrition uses AI-Assisted Meal Planning to propose a seven-day Weekly Plan
 from your Health Profile. The beta is still changing, so features and
 availability may change without notice.
 
-![Synthetic NeuroNutrition Weekly Plan showing Monday breakfast, lunch, dinner, and snack cards with daily nutrition targets](assets/weekly-plan-overview.svg)
+![Synthetic NeuroNutrition Weekly Plan showing the current Monday breakfast, lunch, dinner, and snack meal-card interface](assets/weekly-plan-overview.png)
 
 _Synthetic example only. It contains no real account or Health Profile data._
 
@@ -30,6 +30,10 @@ Use a sign-in method currently offered on the opening screen. Email and password
 access is supported. Google or Apple may also appear while those methods are
 available; if a button is absent or marked unavailable, use another offered
 method. New email accounts may need confirmation before the first sign-in.
+
+After signing in, the app may ask you to choose a Display Name before loading
+your account. Enter the name you want NeuroNutrition to use, then select
+**Save** to continue to the Health Profile.
 
 Your signed-in account keeps its Health Profile and Current Weekly Plan separate
 from other users. Do not share your password or confirmation and recovery links.

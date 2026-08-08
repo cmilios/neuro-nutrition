@@ -70,10 +70,17 @@ const normalizedDestination = (rawDestination) => {
 };
 
 const inlineMarkdownLinks = (text) =>
-  [...text.matchAll(/(!?)\[[^\]]*\]\(([^)]+)\)/g)].map((match) => ({
+  [...text.matchAll(/(!?)\[([^\]]*)\]\(([^)]+)\)/g)].map((match) => ({
     asset: match[1] === "!",
-    rawDestination: match[2],
+    alt: match[1] === "!" ? match[2] : null,
+    rawDestination: match[3],
+    lineNumber: text.slice(0, match.index).split(/\r?\n/).length,
   }));
+
+const normalizedLocalDestination = (rawDestination) =>
+  normalizedDestination(rawDestination)
+    .split(/[?#]/, 1)[0]
+    .replaceAll("\\", "/");
 
 const validateRequiredNavigation = async () => {
   const readme = path.join(root, "README.md");
@@ -87,9 +94,7 @@ const validateRequiredNavigation = async () => {
 
   const destinations = new Set(
     inlineMarkdownLinks(contents).map(({ rawDestination }) =>
-      normalizedDestination(rawDestination)
-        .split(/[?#]/, 1)[0]
-        .replaceAll("\\", "/"),
+      normalizedLocalDestination(rawDestination),
     ),
   );
 
@@ -106,7 +111,7 @@ const validateRequiredNavigation = async () => {
 };
 
 const requiredWikiPages = ["Home.md", "Getting-Started.md", "_Sidebar.md"];
-const representativeWikiAsset = "assets/weekly-plan-overview.svg";
+const representativeWikiAsset = "assets/weekly-plan-overview.png";
 
 const readRequiredFile = async (file, contract, message) => {
   try {
@@ -118,14 +123,10 @@ const readRequiredFile = async (file, contract, message) => {
 };
 
 const markdownDestinations = (contents) =>
-  [...contents.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)].map((match) => ({
-    destination: normalizedDestination(match[1])
-      .split(/[?#]/, 1)[0]
-      .replaceAll("\\", "/"),
-    lineNumber: contents.slice(0, match.index).split(/\r?\n/).length,
-    alt: match[0].startsWith("!")
-      ? match[0].match(/^!\[([^\]]*)\]/)?.[1] ?? ""
-      : null,
+  inlineMarkdownLinks(contents).map((link) => ({
+    destination: normalizedLocalDestination(link.rawDestination),
+    lineNumber: link.lineNumber,
+    alt: link.alt,
   }));
 
 const validateWikiBundle = async () => {
@@ -235,6 +236,7 @@ const validateWikiPublication = async () => {
     [/\bnpm(?:\.cmd)?\s+run\s+docs:check\b/, "Workflow validates documentation before publishing"],
     [/GitHub Wiki target unavailable/i, "Workflow needs a target-unavailable diagnostic"],
     [/\bdocs\/wiki\//, "Workflow must publish the repository-authored Wiki source"],
+    [/Inspect rendered Wiki/i, "Workflow must inspect the rendered Wiki after publication"],
   ];
 
   for (const [pattern, message] of contracts) {

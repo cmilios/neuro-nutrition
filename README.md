@@ -6,7 +6,7 @@ completed week's Meal Review can then shape the user's Next Weekly Plan.
 
 [Open the live beta](https://cmilios.github.io/neuro-nutrition/)
 
-![Synthetic NeuroNutrition Weekly Plan showing Monday meal cards and nutrition targets](docs/wiki/assets/weekly-plan-overview.svg)
+![Synthetic NeuroNutrition Weekly Plan showing the current Monday meal-card interface](docs/wiki/assets/weekly-plan-overview.png)
 
 ## Safety boundary
 

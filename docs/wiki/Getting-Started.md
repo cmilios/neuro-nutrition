@@ -20,6 +20,10 @@ Because this is an early-stage beta, behavior and availability may change.
 
 Keep passwords, confirmation links, and recovery links private.
 
+If **Choose your Display Name** appears after sign-in, enter the name you want
+NeuroNutrition to use and select **Save**. The Health Profile loads after the
+Display Name is saved.
+
 ## 3. Complete your Health Profile
 
 Enter the requested information and check it carefully:
@@ -54,5 +58,18 @@ for medical dietary needs.
 
 Sign in with the same account to load its Current Weekly Plan. On a shared
 device, use the account menu to log out when you finish.
+
+## Recover password access
+
+If you are still signed in to an account that has an email-and-password method,
+open the account menu, choose **Security**, and select **Send recovery email**
+under **Forgot your current password?** Follow the email link to the separate
+recovery screen and set a new password. This does not end the current session.
+
+The signed-out screen does not currently offer a password-recovery request. If
+you are signed out, use another connected sign-in method that is currently
+available or [contact support](https://github.com/cmilios/neuro-nutrition/issues/new)
+for account-access help. Never post a password, recovery link, email address, or
+other private account information in a public issue.
 
 [Return to the user-guide Home](Home.md)

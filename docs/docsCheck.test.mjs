@@ -11,13 +11,13 @@ const baseFixture = {
   "README.md": [
     "# Example project",
     "",
-    "![A synthetic Weekly Plan showing Monday meals](docs/wiki/assets/weekly-plan-overview.svg)",
+    "![A synthetic Weekly Plan showing Monday meals](docs/wiki/assets/weekly-plan-overview.png)",
     "",
   ].join("\n"),
   "docs/wiki/Home.md": [
     "# Home",
     "",
-    "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.svg)",
+    "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.png)",
     "",
     "[Get started](Getting-Started.md)",
     "",
@@ -28,7 +28,7 @@ const baseFixture = {
     "- [Getting Started](Getting-Started.md)",
     "",
   ].join("\n"),
-  "docs/wiki/assets/weekly-plan-overview.svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>\n",
+  "docs/wiki/assets/weekly-plan-overview.png": "synthetic image fixture\n",
   ".github/workflows/publish-wiki.yml": [
     "name: Publish Wiki",
     "on:",
@@ -47,6 +47,8 @@ const baseFixture = {
     "      - run: npm run docs:check",
     "      - run: echo 'GitHub Wiki target unavailable'",
     "      - run: rsync docs/wiki/ wiki-target/",
+    "      - name: Inspect rendered Wiki",
+    "        run: curl https://example.test/wiki",
     "",
   ].join("\n"),
 };
@@ -173,7 +175,7 @@ test("the representative Wiki image requires meaningful alternative text", async
       "docs/wiki/Home.md": [
         "# Home",
         "",
-        "![Screenshot](assets/weekly-plan-overview.svg)",
+        "![Screenshot](assets/weekly-plan-overview.png)",
         "",
         "[Get started](Getting-Started.md)",
         "",
@@ -202,5 +204,6 @@ test("the Wiki publication workflow carries the recovery and safety contract", a
     /contents: write/i,
     /validates documentation before publishing/i,
     /target-unavailable diagnostic/i,
+    /inspect the rendered Wiki/i,
   );
 });

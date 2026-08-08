@@ -43,7 +43,7 @@ jobs:
       - name: Validate documentation before publishing
         run: npm run docs:check
 
-      - name: Verify the GitHub Wiki target
+      - name: Publish validated repository source
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -54,14 +54,6 @@ jobs:
             echo "::error title=GitHub Wiki target unavailable::Enable the repository Wiki and create its initial Home page, then run this workflow again."
             exit 1
           fi
-
-      - name: Publish validated repository source
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          wiki_url="https://github.com/${GITHUB_REPOSITORY}.wiki.git"
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
           git -c http.extraheader="$auth_header" clone --depth 1 "$wiki_url" wiki-target
           rsync --archive --delete --exclude='.git/' docs/wiki/ wiki-target/
           git -C wiki-target config user.name "github-actions[bot]"
@@ -74,3 +66,32 @@ jobs:
           wiki_branch="$(git -C wiki-target branch --show-current)"
           git -C wiki-target commit -m "Publish Wiki from ${GITHUB_SHA}"
           git -C wiki-target -c http.extraheader="$auth_header" push origin "HEAD:${wiki_branch}"
+
+      - name: Inspect rendered Wiki
+        run: |
+          set -euo pipefail
+          home_url="https://github.com/${GITHUB_REPOSITORY}/wiki"
+          getting_started_url="https://github.com/${GITHUB_REPOSITORY}/wiki/Getting-Started"
+          asset_url="https://raw.githubusercontent.com/wiki/${GITHUB_REPOSITORY}/assets/weekly-plan-overview.png"
+          for attempt in 1 2 3 4 5 6; do
+            if home_html="$(curl --fail --location --silent --show-error "$home_url")" \
+              && getting_started_html="$(curl --fail --location --silent --show-error "$getting_started_url")" \
+              && curl --fail --location --silent --show-error --output /dev/null "$asset_url"; then
+              break
+            fi
+            if [ "$attempt" -eq 6 ]; then
+              echo "::error title=Rendered Wiki unavailable::Published Wiki pages or assets could not be loaded."
+              exit 1
+            fi
+            sleep 5
+          done
+          grep --extended-regexp --quiet 'href="/cmilios/neuro-nutrition/wiki/Getting-Started"' <<<"$home_html" \
+            || { echo "::error title=Rendered Wiki navigation missing::Home does not link to Getting Started."; exit 1; }
+          grep --extended-regexp --quiet '<h1[^>]*>.*NeuroNutrition user guide.*</h1>' <<<"$home_html" \
+            || { echo "::error title=Rendered Wiki formatting missing::Home heading did not render."; exit 1; }
+          grep --extended-regexp --quiet '<img[^>]+weekly-plan-overview\.png' <<<"$home_html" \
+            || { echo "::error title=Rendered Wiki image missing::Home does not render the representative image."; exit 1; }
+          grep --extended-regexp --quiet '<h1[^>]*>.*Getting Started.*</h1>' <<<"$getting_started_html" \
+            || { echo "::error title=Rendered Wiki formatting missing::Getting Started heading did not render."; exit 1; }
+          grep --extended-regexp --quiet 'href="/cmilios/neuro-nutrition/wiki/Home"' <<<"$getting_started_html" \
+            || { echo "::error title=Rendered Wiki navigation missing::Getting Started does not link back to Home."; exit 1; }
