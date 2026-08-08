@@ -84,4 +84,3 @@ cannot be restored in the app.
   or device. Wait for the app to reconcile before deciding what to do next.
 
 [Review your week and create a Next Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)
-
