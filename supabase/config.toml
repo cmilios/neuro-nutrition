@@ -22,3 +22,11 @@ verify_jwt = false
 # The function verifies a dedicated high-entropy bearer token by hash before
 # accessing any probe. Supabase API keys are never exposed to the runner.
 verify_jwt = false
+
+[functions.client-incident-alert]
+# Necessarily anonymous: this is the fallback for telemetry that could not reach
+# the database, and `navigator.sendBeacon` cannot attach an Authorization
+# header. It reads no data and writes nothing to the database — it validates a
+# closed payload shape and emits one log line — so there is no authority to
+# protect. Abuse is bounded by a body-size limit and a per-minute cap.
+verify_jwt = false
