@@ -85,7 +85,7 @@ jobs:
             fi
             sleep 5
           done
-          grep --extended-regexp --quiet 'href="/cmilios/neuro-nutrition/wiki/Getting-Started"' <<<"$home_html" \
+          grep --extended-regexp --quiet 'href="(Getting-Started\.md|/cmilios/neuro-nutrition/wiki/Getting-Started)"' <<<"$home_html" \
             || { echo "::error title=Rendered Wiki navigation missing::Home does not link to Getting Started."; exit 1; }
           grep --extended-regexp --quiet '<h1[^>]*>.*NeuroNutrition user guide.*</h1>' <<<"$home_html" \
             || { echo "::error title=Rendered Wiki formatting missing::Home heading did not render."; exit 1; }
@@ -93,5 +93,5 @@ jobs:
             || { echo "::error title=Rendered Wiki image missing::Home does not render the representative image."; exit 1; }
           grep --extended-regexp --quiet '<h1[^>]*>.*Getting Started.*</h1>' <<<"$getting_started_html" \
             || { echo "::error title=Rendered Wiki formatting missing::Getting Started heading did not render."; exit 1; }
-          grep --extended-regexp --quiet 'href="/cmilios/neuro-nutrition/wiki/Home"' <<<"$getting_started_html" \
+          grep --extended-regexp --quiet 'href="(Home\.md|/cmilios/neuro-nutrition/wiki/Home)"' <<<"$getting_started_html" \
             || { echo "::error title=Rendered Wiki navigation missing::Getting Started does not link back to Home."; exit 1; }
