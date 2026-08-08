@@ -11,7 +11,7 @@ used as the rehearsal project ref.
 ## Post-release observation and delivery gate
 
 Issue #25 adds a separate, read-only delivery gate. Migration
-`20260729120000_create_weekly_plan_observation.sql` creates the
+`20260730061940_create_weekly_plan_observation.sql` creates the
 `weekly_plan_monitor` NOLOGIN role and grants it only execution of an aggregate
 snapshot function. Provision the workflow token with that role; never use the
 service-role key for observation.
@@ -31,7 +31,7 @@ the application from being built or deployed.
 The schedule is disabled by default so an unprovisioned monitor does not create
 continuous failed GitHub Actions runs. Before enabling it:
 
-1. Apply `20260729120000_create_weekly_plan_observation.sql`.
+1. Apply `20260730061940_create_weekly_plan_observation.sql`.
 2. Deploy the database, release-identity, and function-failure GET probes.
 3. Configure their `OBSERVATION_*_URL` and least-privilege
    `OBSERVATION_*_TOKEN` repository secrets. `OBSERVATION_ALERT_URL` is
