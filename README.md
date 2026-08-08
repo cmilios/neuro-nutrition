@@ -47,6 +47,7 @@ npm run build
 - [Developer setup and testing](docs/development.md)
 - [Contribution guide](CONTRIBUTING.md)
 - [Domain language and product concepts](CONTEXT.md)
+- [System architecture and trust boundaries](docs/architecture.md)
 - [Deployment and local backend operations](DEPLOYMENT.md)
 - [OAuth verification matrix](docs/oauth/verification-matrix.md)
 - [OAuth release checklist](docs/oauth/release-checklist.md)
