@@ -69,6 +69,36 @@ const normalizedDestination = (rawDestination) => {
   return trimmed.split(/\s+/, 1)[0];
 };
 
+const validateRequiredNavigation = async () => {
+  const readme = path.join(root, "README.md");
+  let contents;
+  try {
+    contents = await readFile(readme, "utf8");
+  } catch {
+    reportFailure(readme, 1, "required-navigation", "README.md is required");
+    return;
+  }
+
+  const destinations = new Set(
+    [...contents.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)].map((match) =>
+      normalizedDestination(match[1])
+        .split(/[?#]/, 1)[0]
+        .replaceAll("\\", "/"),
+    ),
+  );
+
+  for (const destination of ["docs/development.md", "CONTRIBUTING.md"]) {
+    if (!destinations.has(destination)) {
+      reportFailure(
+        readme,
+        1,
+        "required-navigation",
+        `Landing page must link to ${destination}`,
+      );
+    }
+  }
+};
+
 const validateLocalDestination = async ({
   document,
   lineNumber,
@@ -226,6 +256,8 @@ for (const document of await listMarkdown(root)) {
   }
   await validateReferenceMarkdown(document, lines);
 }
+
+await validateRequiredNavigation();
 
 if (failures.length > 0) {
   console.error(failures.join("\n"));

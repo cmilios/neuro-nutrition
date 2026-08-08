@@ -41,6 +41,8 @@ npm run build
 
 ## Documentation
 
+- [Developer setup and testing](docs/development.md)
+- [Contribution guide](CONTRIBUTING.md)
 - [Domain language and product concepts](CONTEXT.md)
 - [Deployment and local backend operations](DEPLOYMENT.md)
 - [OAuth verification matrix](docs/oauth/verification-matrix.md)
