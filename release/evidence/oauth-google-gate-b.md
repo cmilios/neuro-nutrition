@@ -49,8 +49,8 @@ contract (matrix G2, G5).
 | M3 | Cancellation / denied consent | **Not run** | Operator-only. |
 | M4 | Session restoration across the real redirect | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M5 | Display Name handling | Not re-run here | Reported in a prior session against `27caf4b`. |
-| M6 | Account Security connected methods | Not re-run here | Reported in a prior session against `27caf4b`. |
-| M7 | Logout then re-login | **Not run** | Operator-only. |
+| M6 | Account Security connected methods | **Fail** | Finding 6. Disconnect is broken for every multi-identity account. |
+| M7 | Logout then re-login | **Pass** | Auth logs 2026-08-08 show `logout` (204) followed 13s later by `/authorize` → `/callback` (302) and a `login_method: oauth, provider: google` for the same user. Derived from logs, not an observed UI run. |
 | M8 | Same-email automatic linking | Not re-run here | Reported in a prior session against `27caf4b`. |
 | M9 | Apple private relay | `N/A` | Apple remains `off`. |
 | M10 | Email/password regression | **Not run** | Requires authenticating and registering in production; operator-only. |
@@ -142,6 +142,38 @@ reaches any operator surface.
 `console.error`. Client-side only and not exfiltrated, but M11 asks that no raw
 provider messages appear in logs or browser code. Noted, not treated as a hard
 blocker; **not fixed**.
+
+### 6. Disconnecting a sign-in method is impossible — manual linking is disabled
+
+Observed 2026-08-08 in the deployed app: signed in with Google on an account
+that also has a password, Account Security → Disconnect returned "The sign-in
+method could not be disconnected. Please try again."
+
+That is the failure branch, not the single-method guard. The guard at
+`components/UserProfileModal.tsx:387` correctly stood aside — the account has
+two identities — and `supabase.auth.unlinkIdentity` was called and refused.
+Project auth logs show five identical failures:
+
+```
+DELETE /user/identities/<identity_id>
+404: Manual linking is disabled     error_code: manual_linking_disabled
+```
+
+`unlinkIdentity` requires the project's manual-linking option, which is
+disabled. The control therefore cannot work for *any* account with more than
+one identity — which is every account that has used OAuth. Automatic linking is
+unaffected, so accounts still merge by email correctly; only the reverse
+operation is broken.
+
+This is the same class of fault as findings 1–3: a client feature shipped and
+unit-tested against a server configuration that was never applied. The unit
+tests at `components/UserProfileModal.test.tsx:116` and `:161` both pass,
+because they exercise the guard and the success path against a stubbed
+`onDisconnectSignInMethod` — no test asserts the server permits the call.
+
+Remediation: `enable_manual_linking = true` recorded in `supabase/config.toml`;
+the live project setting still has to be enabled by an operator. Not yet
+applied.
 
 ## Remediation (applied to production 2026-08-08)
 
