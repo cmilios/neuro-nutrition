@@ -44,7 +44,7 @@ contract (matrix G2, G5).
 
 | # | Case | Outcome | Evidence |
 | --- | --- | --- | --- |
-| M1 | New sign-in | **Not run** | Requires a signed-out browser and a dedicated test Google account; operator-only. |
+| M1 | New sign-in | **Partial — accepted** | No never-seen Google account was available. Covered indirectly by M8; the residual gap is stated under [M1 residual risk](#m1-residual-risk). Operator accepted 2026-08-08. |
 | M2 | Returning sign-in | **Pass** | Auth logs 2026-08-08 show four separate `/authorize` → `/callback` → `login_method: oauth, provider: google` cycles for the same existing user, all `302`/success. |
 | M3 | Cancellation / denied consent | **Pass** | Operator cancelled at Google's consent screen 2026-08-08; the app recovered with no error state. `weekly_plan_client_incidents` holds zero `oauth_auth_failure` rows, so cancellation was correctly not treated as a failure (matrix C2). |
 | M4 | Session restoration across the real redirect | Not re-run here | Reported in a prior session against `27caf4b`. |
@@ -254,6 +254,42 @@ The negative cases matter as much as the positive one: granting `anon` execute
 did not widen the write path beyond OAuth failures, and did not weaken the
 privacy filter.
 
+### M1 residual risk
+
+M1 asks for a Google account that has never used the app. None was available —
+the only Google account to hand has extensive history here — and the
+alternatives were rejected as disproportionate: a second Google account was not
+available, and deleting the existing user to force first contact would have
+destroyed that account's application data.
+
+**What the M8 run does cover.** Unlinking the Google identity and signing in
+again drove the full redirect → consent → callback → session path and caused
+GoTrue to create a *new identity row* and attach it to a user. Redirect
+handling, callback processing, session establishment and identity creation are
+therefore exercised.
+
+**What the M10 run covers.** Registering through email/password creates a
+brand-new `auth.users` row with no `user_data`, so the new-user bootstrap —
+first load with no stored profile, and whatever onboarding that triggers — is
+exercised, just not via Google.
+
+**What remains unproven.** Only the intersection: GoTrue creating a *new user*
+from an *OAuth identity*, where no existing user matches the provider's email.
+Concretely, two things are untested — the no-match branch of automatic linking,
+and Display Name derivation from a Google profile onto a freshly created account
+(M5 covered display name, but on an account that already existed).
+
+This is narrower than "M1 was skipped", but it is not nothing: it is the exact
+path every genuinely new user takes after promotion, and it is the first thing
+they experience.
+
+**Recommended mitigation, not yet performed.** During the controlled
+verification window, confirm the first genuinely new Google user lands
+correctly — a new `auth.users` row, a usable Display Name, and a working first
+load. That converts this from an unknown into a watched risk, and it is now
+observable because incident delivery works. Until then M1 is not a clean pass
+and this record should not be read as one.
+
 ### Why the incident count is now interpretable
 
 After the operator's manual runs on 2026-08-08 — four Google sign-ins, a logout
@@ -351,7 +387,8 @@ it; finding 5; and the operator-only manual cases M1, M3, M7, M10.
 ## Sign-off
 
 - [ ] Gate A confirmed green on the commit SHA above — *local only; CI does not run tests*
-- [ ] M1–M13 complete for this provider — *M1, M3, M7, M10 outstanding (operator-only)*
+- [ ] M1–M13 complete for this provider — *M10 outstanding; M1 accepted as a
+  documented partial, not a pass*
 - [x] All evidence fields recorded; no secrets present in any evidence
 - [x] M12 incident-channel health check passed — live against production, 2026-08-08
 - [ ] M13 monitoring in place for controlled verification and the first 24h — *mechanism verified; watch not yet run*
