@@ -53,7 +53,7 @@ contract (matrix G2, G5).
 | M7 | Logout then re-login | **Pass** | Auth logs 2026-08-08 show `logout` (204) followed 13s later by `/authorize` → `/callback` (302) and a `login_method: oauth, provider: google` for the same user. Derived from logs, not an observed UI run. |
 | M8 | Same-email automatic linking | **Pass** | Directly demonstrated 2026-08-08: the Google identity was unlinked (`200`), then a subsequent Google sign-in 31s later attached to the **same user id** rather than creating a second account. |
 | M9 | Apple private relay | `N/A` | Apple remains `off`. |
-| M10 | Email/password regression | **Not run** | Requires authenticating and registering in production; operator-only. |
+| M10 | Email/password regression | **Partial — accepted** | Registration verified in production (see below). Change-password and recovery deliberately not run; operator accepted 2026-08-08. |
 | M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. |
 | M12 | Incident-channel health check | **Pass** | Live end-to-end check against production with the anon key, 2026-08-08 — see [Live incident-channel health check](#live-incident-channel-health-check). |
 | M13 | Monitoring | **Ready, not run** | Mechanism verified: the observation snapshot classified a live `oauth_auth_failure` as `critical`. The 24h watch itself is an operator activity during controlled verification. |
@@ -268,10 +268,13 @@ GoTrue to create a *new identity row* and attach it to a user. Redirect
 handling, callback processing, session establishment and identity creation are
 therefore exercised.
 
-**What the M10 run covers.** Registering through email/password creates a
-brand-new `auth.users` row with no `user_data`, so the new-user bootstrap —
-first load with no stored profile, and whatever onboarding that triggers — is
-exercised, just not via Google.
+**What the M10 run covers.** Confirmed in the auth logs 2026-08-08: a
+`POST /signup` returned `200` and created a brand-new `auth.users` row with
+`provider: email` and no `user_data`, so the new-user bootstrap — first load
+with no stored profile, and whatever onboarding that triggers — is exercised,
+just not via Google. A preceding `422` also confirmed the password policy
+(`letters_digits`, minimum 8) is enforced server-side in production, which
+nothing had previously verified.
 
 **What remains unproven.** Only the intersection: GoTrue creating a *new user*
 from an *OAuth identity*, where no existing user matches the provider's email.
@@ -289,6 +292,24 @@ correctly — a new `auth.users` row, a usable Display Name, and a working first
 load. That converts this from an unknown into a watched risk, and it is now
 observable because incident delivery works. Until then M1 is not a clean pass
 and this record should not be read as one.
+
+### M10 residual risk
+
+Registration and server-side password-policy enforcement are verified above.
+Password login, change-password and recovery were **not run**; the operator
+accepted this on 2026-08-08, to be addressed reactively in production.
+
+This is not a promotion risk: promoting Google does not touch the
+email/password paths, so the exposure is identical before and after. It is a
+pre-existing unknown that the checklist would have closed, not one the rollout
+creates.
+
+Worth checking separately, because it is the same shape as findings 1–3 and 6 —
+a client feature depending on server configuration nobody confirmed: password
+recovery requires working outbound email, and Supabase's built-in sender is
+rate-limited and not intended for production use. If custom SMTP is not
+configured, recovery fails for real users, and recovery is the only self-serve
+route back in for someone locked out. No evidence either way was gathered.
 
 ### Why the incident count is now interpretable
 
@@ -387,8 +408,8 @@ it; finding 5; and the operator-only manual cases M1, M3, M7, M10.
 ## Sign-off
 
 - [ ] Gate A confirmed green on the commit SHA above — *local only; CI does not run tests*
-- [ ] M1–M13 complete for this provider — *M10 outstanding; M1 accepted as a
-  documented partial, not a pass*
+- [ ] M1–M13 complete for this provider — *M1 and M10 accepted as documented
+  partials, not passes; M13 runs during controlled verification*
 - [x] All evidence fields recorded; no secrets present in any evidence
 - [x] M12 incident-channel health check passed — live against production, 2026-08-08
 - [ ] M13 monitoring in place for controlled verification and the first 24h — *mechanism verified; watch not yet run*
