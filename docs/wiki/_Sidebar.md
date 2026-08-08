@@ -1,2 +1,5 @@
 - [Home](https://github.com/cmilios/neuro-nutrition/wiki)
 - [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
+- [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
+- [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)
+- [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)

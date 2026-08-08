@@ -110,12 +110,22 @@ const validateRequiredNavigation = async () => {
   }
 };
 
-const requiredWikiPages = ["Home.md", "Getting-Started.md", "_Sidebar.md"];
+const requiredWikiPages = [
+  "Home.md",
+  "Getting-Started.md",
+  "Using-Your-Weekly-Plan.md",
+  "Reviewing-Your-Week.md",
+  "Start-Over.md",
+  "_Sidebar.md",
+];
 const representativeWikiAsset = "assets/weekly-plan-overview.png";
 const publishedWikiPages = new Map([
   ["https://github.com/cmilios/neuro-nutrition/wiki", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Home", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started", "Getting-Started.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan", "Using-Your-Weekly-Plan.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week", "Reviewing-Your-Week.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Start-Over", "Start-Over.md"],
 ]);
 
 const readRequiredFile = async (file, contract, message) => {
@@ -158,9 +168,23 @@ const validateWikiBundle = async () => {
   );
 
   const navigationContract = [
-    ["Home.md", ["Getting-Started.md"]],
+    ["Home.md", [
+      "Getting-Started.md",
+      "Using-Your-Weekly-Plan.md",
+      "Reviewing-Your-Week.md",
+      "Start-Over.md",
+    ]],
     ["Getting-Started.md", ["Home.md"]],
-    ["_Sidebar.md", ["Home.md", "Getting-Started.md"]],
+    ["Using-Your-Weekly-Plan.md", ["Home.md"]],
+    ["Reviewing-Your-Week.md", ["Home.md"]],
+    ["Start-Over.md", ["Home.md"]],
+    ["_Sidebar.md", [
+      "Home.md",
+      "Getting-Started.md",
+      "Using-Your-Weekly-Plan.md",
+      "Reviewing-Your-Week.md",
+      "Start-Over.md",
+    ]],
   ];
   for (const [page, requiredDestinations] of navigationContract) {
     const contents = pages.get(page);
