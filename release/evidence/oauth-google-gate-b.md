@@ -241,12 +241,23 @@ the operator's logs. The per-minute cap and the log emission itself are covered
 by unit tests (8 cases in `handler.test.ts`) rather than exercised against
 production, to avoid flooding it.
 
-**Not verified:** that the emitted line is visible on the operator's log
-surface. The MCP `get_logs` edge-function view returned only request-level
-entries, no `console` output for any function, and lagged behind these calls.
-The handler-to-log boundary is unit-tested and the wiring is a single
-`console.warn`, but the last hop is unconfirmed and should be eyeballed on the
-dashboard before the fallback is relied on.
+Log visibility: `console.warn` output appears under a function's **Logs** view,
+not the **Invocations** view the dashboard opens by default, which is why the
+first check appeared to show nothing. The MCP `get_logs` edge-function query
+reads the request-level logs only, so it cannot see console output for any
+function. The `204` response is itself evidence the line was emitted, since that
+status is returned only after `recordAlert` runs.
+
+Because a log line is a pull surface that nobody polls — the project's actual
+monitoring path is `get_weekly_plan_observation_snapshot`, which a log line is
+not on — the receiver also forwards to a notification channel. The channel URL
+is a Supabase **function secret** (`CLIENT_INCIDENT_WEBHOOK_URL`), read
+server-side and never present in the client bundle; a `VITE_`-prefixed webhook
+would be inlined at build time and readable by anyone. Forwarding is
+best-effort: the log line is written first, the response never waits on the
+channel, and failures are reported as a closed set of codes rather than raw
+fetch errors, since a Deno network error can embed the request URL — which is
+the secret.
 
 **Still required and not done:** setting the `VITE_CLIENT_INCIDENT_ALERT_URL`
 secret to the deployed function URL and redeploying Pages so the build inlines
