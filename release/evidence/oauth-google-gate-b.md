@@ -3,14 +3,18 @@
 Per [docs/oauth/release-checklist.md](../../docs/oauth/release-checklist.md),
 backed by [docs/oauth/verification-matrix.md](../../docs/oauth/verification-matrix.md).
 
-**Provider:** `google` · **Commit SHA:** `0720be1` ·
-**Release ID:** `0720be1fe779f76a385084604331797ebca8f6b6` ·
+**Provider:** `google` · **Commit SHA:** `3fb24d9` ·
+**Release ID:** `3fb24d90b74eddf512285f54abe11104fb2b8641` ·
 **Supabase project ref:** `cmayisxvronrwvzhyuer` ·
 **Verification URL:** `/neuro-nutrition/verify-oauth/`
 
-**Status: INCOMPLETE — promotion blocked.** Findings 1–3 were remediated and
-verified against production on 2026-08-08; findings 4–5 and the operator-only
-manual cases remain open. See [Blocking findings](#blocking-findings).
+**Status: PROMOTED to `on` 2026-08-08**, on operator authorisation with M1 and
+M10 accepted as documented partials. Findings 1–4 and 6 are resolved and
+verified in production; finding 5 remains open and unfixed. See
+[Findings](#blocking-findings) and [Promotion](#promotion).
+
+Earlier revisions of this record were written against the pre-merge commit
+`0720be1`; the header above is the commit actually deployed at promotion.
 
 ## Gate A confirmation
 
@@ -19,13 +23,21 @@ Gate A on any commit. Gate A was therefore established locally against the
 deployed commit `0720be1` on 2026-08-08: `npm test` 290/290, `npm run typecheck`
 clean, `npm run build` clean.
 
-Caveat: the suite is flaky under parallel load. Two consecutive full runs
-produced 5 failures and then 1 different failure, all `beforeEach` / render hook
-timeouts in PGlite and `App.test.tsx`. Every failing file passed in isolation,
-so these are resource contention, not regressions — but a test job added to CI
-as-is would be intermittently red.
+**Re-established on the promoted commit `3fb24d9` (2026-08-08):**
+`npx vitest run --no-file-parallelism` → **306/306 in 44/44 files**,
+`npm run typecheck` clean, `npm run build` clean.
+
+Caveat, now with a remedy: the suite is flaky under *parallel* load. Successive
+full runs on this same commit produced 6 failures, then 1 failure in a different
+file, then a clean 306/306 sequentially — all `beforeEach` / render hook
+timeouts in PGlite and `App.test.tsx`, never assertion failures. Running with
+`--no-file-parallelism` is deterministic and green, which removes the objection
+to adding a CI test job: the job should pin file parallelism rather than run the
+default. Cost is runtime, 127s against ~54s.
 
 ## Live configuration observed (2026-08-08)
+
+Recorded **before promotion**, while the gate was still `verify`:
 
 | Item | Observed |
 | --- | --- |
@@ -35,10 +47,15 @@ as-is would be intermittently red.
 | Deployed Pages commit | `0720be1` (workflow run succeeded) |
 | `/neuro-nutrition/verify-oauth/` | HTTP 200 |
 
-Gating behavior verified live on the deployed build: Log In and Create Account
-show email/password only with no provider rail; the verification URL shows
-"FASTER SIGN-IN → Continue with Google" and no Apple. This matches the `verify`
+Gating behavior verified live on that build: Log In and Create Account showed
+email/password only with no provider rail; the verification URL showed
+"FASTER SIGN-IN → Continue with Google" and no Apple. This matched the `verify`
 contract (matrix G2, G5).
+
+The post-promotion configuration — `google: on`, commit `3fb24d9`, providers
+now shown on Log In and Create Account — is recorded under
+[Promotion](#promotion). Both states are kept deliberately: the `verify`
+observation is the evidence that gating worked before the gate was opened.
 
 ## Manual verification cases
 
@@ -56,7 +73,7 @@ contract (matrix G2, G5).
 | M10 | Email/password regression | **Partial — accepted** | Registration verified in production (see below). Change-password and recovery deliberately not run; operator accepted 2026-08-08. |
 | M11 | Failure paths emit sanitized evidence | **Pass** | Sanitization proven by unit tests; delivery proven live (below). Triggering a real provider error is covered by the operator's M3 run. |
 | M12 | Incident-channel health check | **Pass** | Live end-to-end check against production with the anon key, 2026-08-08 — see [Live incident-channel health check](#live-incident-channel-health-check). |
-| M13 | Monitoring | **Ready, not run** | Mechanism verified: the observation snapshot classified a live `oauth_auth_failure` as `critical`. The 24h watch itself is an operator activity during controlled verification. |
+| M13 | Monitoring | **Running** | Mechanism verified pre-promotion: the observation snapshot classified a live `oauth_auth_failure` as `critical`. Baseline captured at promotion and the 24h watch started — see [M13 monitoring](#m13-monitoring). |
 
 ### What passes
 
@@ -405,13 +422,57 @@ it; finding 5; and the operator-only manual cases M1, M3, M7, M10.
   several `SECURITY DEFINER` functions are executable by `authenticated` (WARN).
   Neither is specific to Google sign-in.
 
+## Promotion
+
+Performed 2026-08-08 on explicit operator authorisation, the checklist being
+incomplete (M1 and M10 accepted partials). Sequence and evidence:
+
+| Step | Result |
+| --- | --- |
+| Merge PR #66 to `main` (rebase, 11 commits) | `main` at `3fb24d9` |
+| Pages deploy of `3fb24d9` at `verify` | run `31267918607`, success |
+| Gate A re-established on `3fb24d9` | 306/306, typecheck and build clean |
+| `VITE_CLIENT_INCIDENT_ALERT_URL` reaches the bundle | confirmed present in the deployed app chunk — finding 4 fully closed |
+| `VITE_OAUTH_GOOGLE_MODE` `verify` → `on` | set 16:57:27Z; `VITE_OAUTH_APPLE_MODE` untouched at `off` |
+| Pages deploy applying the mode | run `31268241132`, success |
+| Live Log In tab | email/password **and** "FASTER SIGN-IN → Continue with Google" |
+| Live Create Account tab | same; Google present |
+| Apple | absent from both tabs |
+| Browser console | no errors |
+
+The mode flip needed its own deploy: `VITE_` values are inlined at build time,
+so changing the repository variable alone changes nothing until the next build.
+
+**Rollback:** set `VITE_OAUTH_GOOGLE_MODE` to `off` and re-run the deploy
+workflow. The build fails closed to `off` if the variable is missing entirely.
+
+## M13 monitoring
+
+Baseline at promotion, 2026-08-08 17:00:05Z:
+
+| Metric | Value |
+| --- | --- |
+| `clientIncidents.total` (15 min window) | 0 |
+| `clientIncidents.critical` (15 min window) | 0 |
+| `oauth_auth_failure` rows, all time | 0 |
+
+A rise in `critical` now means real OAuth failures, because delivery was proven
+end to end before promotion. Two things to watch in the first 24 hours:
+
+1. Any `oauth_auth_failure` row — read `provider`, `lifecycleStage` and
+   `errorCode`; the payload carries nothing else.
+2. **The first genuinely new Google user**, which is the M1 gap: confirm a new
+   `auth.users` row, a usable Display Name and a working first load. Until one
+   such user is observed, the OAuth-originated user-creation path remains
+   unproven in production.
+
 ## Sign-off
 
-- [ ] Gate A confirmed green on the commit SHA above — *local only; CI does not run tests*
+- [x] Gate A confirmed green on the commit SHA above — *local only; CI still does not run tests*
 - [ ] M1–M13 complete for this provider — *M1 and M10 accepted as documented
   partials, not passes; M13 runs during controlled verification*
 - [x] All evidence fields recorded; no secrets present in any evidence
 - [x] M12 incident-channel health check passed — live against production, 2026-08-08
-- [ ] M13 monitoring in place for controlled verification and the first 24h — *mechanism verified; watch not yet run*
+- [x] M13 monitoring in place for controlled verification and the first 24h — *baseline recorded at promotion; the 24h watch is now running*
 
-**Promotion decision:** `hold`
+**Promotion decision:** `promote` — executed 2026-08-08 17:00Z
