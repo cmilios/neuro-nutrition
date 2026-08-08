@@ -9,6 +9,11 @@ additional_redirect_urls = [
 ]
 minimum_password_length = 8
 password_requirements = "letters_digits"
+# Required by the Disconnect control in Account Security. `unlinkIdentity`
+# returns 404 `manual_linking_disabled` without it, so the button fails for
+# every account that has more than one identity — which is every account that
+# has used OAuth. See release/evidence/oauth-google-gate-b.md, finding 6.
+enable_manual_linking = true
 
 [auth.email]
 secure_password_change = true
