@@ -1,0 +1,76 @@
+name: Publish Wiki
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/wiki/**"
+      - "docs/check.mjs"
+      - "docs/docsCheck.test.mjs"
+      - ".github/workflows/publish-wiki.yml"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Use declared npm version
+        run: npm install --global "$(node --print "require('./package.json').packageManager")"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate documentation before publishing
+        run: npm run docs:check
+
+      - name: Verify the GitHub Wiki target
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wiki_url="https://github.com/${GITHUB_REPOSITORY}.wiki.git"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          if ! git -c http.extraheader="$auth_header" ls-remote "$wiki_url" HEAD >/dev/null 2>&1; then
+            echo "::error title=GitHub Wiki target unavailable::Enable the repository Wiki and create its initial Home page, then run this workflow again."
+            exit 1
+          fi
+
+      - name: Publish validated repository source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wiki_url="https://github.com/${GITHUB_REPOSITORY}.wiki.git"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$auth_header" clone --depth 1 "$wiki_url" wiki-target
+          rsync --archive --delete --exclude='.git/' docs/wiki/ wiki-target/
+          git -C wiki-target config user.name "github-actions[bot]"
+          git -C wiki-target config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C wiki-target add --all
+          if git -C wiki-target diff --cached --quiet; then
+            echo "Wiki is already current."
+            exit 0
+          fi
+          wiki_branch="$(git -C wiki-target branch --show-current)"
+          git -C wiki-target commit -m "Publish Wiki from ${GITHUB_SHA}"
+          git -C wiki-target -c http.extraheader="$auth_header" push origin "HEAD:${wiki_branch}"

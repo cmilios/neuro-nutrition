@@ -105,6 +105,145 @@ const validateRequiredNavigation = async () => {
   }
 };
 
+const requiredWikiPages = ["Home.md", "Getting-Started.md", "_Sidebar.md"];
+const representativeWikiAsset = "assets/weekly-plan-overview.svg";
+
+const readRequiredFile = async (file, contract, message) => {
+  try {
+    return await readFile(file, "utf8");
+  } catch {
+    reportFailure(file, 1, contract, message);
+    return null;
+  }
+};
+
+const markdownDestinations = (contents) =>
+  [...contents.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)].map((match) => ({
+    destination: normalizedDestination(match[1])
+      .split(/[?#]/, 1)[0]
+      .replaceAll("\\", "/"),
+    lineNumber: contents.slice(0, match.index).split(/\r?\n/).length,
+    alt: match[0].startsWith("!")
+      ? match[0].match(/^!\[([^\]]*)\]/)?.[1] ?? ""
+      : null,
+  }));
+
+const validateWikiBundle = async () => {
+  const wikiRoot = path.join(root, "docs", "wiki");
+  const pages = new Map();
+
+  for (const page of requiredWikiPages) {
+    const file = path.join(wikiRoot, page);
+    const contents = await readRequiredFile(
+      file,
+      "wiki-bundle",
+      `Required Wiki page is missing: ${page}`,
+    );
+    if (contents !== null) pages.set(page, contents);
+  }
+
+  const asset = path.join(wikiRoot, representativeWikiAsset);
+  await readRequiredFile(
+    asset,
+    "wiki-bundle",
+    `Required Wiki asset is missing: ${representativeWikiAsset}`,
+  );
+
+  const navigationContract = [
+    ["Home.md", ["Getting-Started.md"]],
+    ["Getting-Started.md", ["Home.md"]],
+    ["_Sidebar.md", ["Home.md", "Getting-Started.md"]],
+  ];
+  for (const [page, requiredDestinations] of navigationContract) {
+    const contents = pages.get(page);
+    if (contents === undefined) continue;
+    const destinations = new Set(
+      markdownDestinations(contents).map(({ destination }) => destination),
+    );
+    for (const destination of requiredDestinations) {
+      if (!destinations.has(destination)) {
+        reportFailure(
+          path.join(wikiRoot, page),
+          1,
+          "wiki-navigation",
+          `Wiki navigation must link to ${destination}`,
+        );
+      }
+    }
+  }
+
+  const home = pages.get("Home.md");
+  if (home !== undefined) {
+    const image = markdownDestinations(home).find(
+      ({ destination, alt }) => destination === representativeWikiAsset && alt !== null,
+    );
+    if (!image) {
+      reportFailure(
+        path.join(wikiRoot, "Home.md"),
+        1,
+        "wiki-image-alt",
+        `Home must include ${representativeWikiAsset} with meaningful alternative text`,
+      );
+    } else if (
+      image.alt.trim().length < 20
+      || /^(?:image|photo|screenshot|weekly plan)$/i.test(image.alt.trim())
+    ) {
+      reportFailure(
+        path.join(wikiRoot, "Home.md"),
+        image.lineNumber,
+        "wiki-image-alt",
+        "Representative Wiki image needs meaningful alternative text",
+      );
+    }
+  }
+
+  const readme = await readRequiredFile(
+    path.join(root, "README.md"),
+    "wiki-bundle",
+    "README.md is required",
+  );
+  const sharedAssetDestination = `docs/wiki/${representativeWikiAsset}`;
+  if (
+    readme !== null
+    && !markdownDestinations(readme).some(
+      ({ destination, alt }) => destination === sharedAssetDestination && alt !== null,
+    )
+  ) {
+    reportFailure(
+      path.join(root, "README.md"),
+      1,
+      "wiki-bundle",
+      `Landing page must reference the shared Wiki asset: ${sharedAssetDestination}`,
+    );
+  }
+};
+
+const validateWikiPublication = async () => {
+  const workflow = path.join(root, ".github", "workflows", "publish-wiki.yml");
+  const contents = await readRequiredFile(
+    workflow,
+    "wiki-publication",
+    "Wiki publication workflow is missing",
+  );
+  if (contents === null) return;
+
+  const contracts = [
+    [/\bworkflow_dispatch\s*:/, "Manual recovery trigger is required"],
+    [/\bconcurrency\s*:/, "Serialized publication requires a concurrency group"],
+    [/\bgroup\s*:\s*wiki-publication\b/, "Serialized publication must use the Wiki target group"],
+    [/\bcontents\s*:\s*write\b/, "Wiki publication requires contents: write"],
+    [/\bnpm(?:\.cmd)?\s+run\s+docs:check\b/, "Workflow validates documentation before publishing"],
+    [/GitHub Wiki target unavailable/i, "Workflow needs a target-unavailable diagnostic"],
+    [/\bdocs\/wiki\//, "Workflow must publish the repository-authored Wiki source"],
+  ];
+
+  for (const [pattern, message] of contracts) {
+    if (!pattern.test(contents)) {
+      reportFailure(workflow, 1, "wiki-publication", message);
+    }
+  }
+};
+
 const validateLocalDestination = async ({
   document,
   lineNumber,
@@ -264,6 +403,8 @@ for (const document of await listMarkdown(root)) {
 }
 
 await validateRequiredNavigation();
+await validateWikiBundle();
+await validateWikiPublication();
 
 if (failures.length > 0) {
   console.error(failures.join("\n"));

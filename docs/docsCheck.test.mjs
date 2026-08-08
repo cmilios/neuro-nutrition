@@ -6,8 +6,49 @@ import { expect, test } from "vitest";
 
 const validatorPath = path.resolve("docs/check.mjs");
 const baseFixture = {
-  "package.json": JSON.stringify({ scripts: {} }),
+  "package.json": JSON.stringify({ scripts: { "docs:check": "node docs/check.mjs" } }),
   ".env.example": "VITE_PUBLIC_URL=https://example.test\n",
+  "README.md": [
+    "# Example project",
+    "",
+    "![A synthetic Weekly Plan showing Monday meals](docs/wiki/assets/weekly-plan-overview.svg)",
+    "",
+  ].join("\n"),
+  "docs/wiki/Home.md": [
+    "# Home",
+    "",
+    "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.svg)",
+    "",
+    "[Get started](Getting-Started.md)",
+    "",
+  ].join("\n"),
+  "docs/wiki/Getting-Started.md": "# Getting Started\n\n[Return home](Home.md)\n",
+  "docs/wiki/_Sidebar.md": [
+    "- [Home](Home.md)",
+    "- [Getting Started](Getting-Started.md)",
+    "",
+  ].join("\n"),
+  "docs/wiki/assets/weekly-plan-overview.svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>\n",
+  ".github/workflows/publish-wiki.yml": [
+    "name: Publish Wiki",
+    "on:",
+    "  push:",
+    "    branches: [main]",
+    "    paths: [docs/wiki/**]",
+    "  workflow_dispatch:",
+    "permissions:",
+    "  contents: write",
+    "concurrency:",
+    "  group: wiki-publication",
+    "  cancel-in-progress: false",
+    "jobs:",
+    "  publish:",
+    "    steps:",
+    "      - run: npm run docs:check",
+    "      - run: echo 'GitHub Wiki target unavailable'",
+    "      - run: rsync docs/wiki/ wiki-target/",
+    "",
+  ].join("\n"),
 };
 
 const withFixture = async (files, run) => {
@@ -15,6 +56,7 @@ const withFixture = async (files, run) => {
   try {
     await Promise.all(
       Object.entries({ ...baseFixture, ...files }).map(async ([file, contents]) => {
+        if (contents === null) return;
         const target = path.join(root, file);
         await mkdir(path.dirname(target), { recursive: true });
         await writeFile(target, contents);
@@ -106,5 +148,59 @@ test("a broken shortcut-style Markdown target identifies its source document", a
     { "README.md": "See [setup].\n\n[setup]: docs/missing.md\n" },
     /README\.md:3 \[markdown-link\]/,
     /docs\/missing\.md/,
+  );
+});
+
+test("a missing required Wiki page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Getting-Started.md": null },
+    /docs\/wiki\/Getting-Started\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("Wiki Home must navigate to Getting Started", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Home.md": "# Home\n" },
+    /docs\/wiki\/Home\.md:1 \[wiki-navigation\]/,
+    /Getting-Started\.md/,
+  );
+});
+
+test("the representative Wiki image requires meaningful alternative text", async () => {
+  await expectContractFailure(
+    {
+      "docs/wiki/Home.md": [
+        "# Home",
+        "",
+        "![Screenshot](assets/weekly-plan-overview.svg)",
+        "",
+        "[Get started](Getting-Started.md)",
+        "",
+      ].join("\n"),
+    },
+    /docs\/wiki\/Home\.md:3 \[wiki-image-alt\]/,
+    /meaningful alternative text/i,
+  );
+});
+
+test("the Wiki publication workflow carries the recovery and safety contract", async () => {
+  await expectContractFailure(
+    {
+      ".github/workflows/publish-wiki.yml": [
+        "name: Publish Wiki",
+        "on: [push]",
+        "permissions:",
+        "  contents: read",
+        "jobs: {}",
+        "",
+      ].join("\n"),
+    },
+    /\.github\/workflows\/publish-wiki\.yml:1 \[wiki-publication\]/,
+    /manual recovery trigger/i,
+    /serialized publication/i,
+    /contents: write/i,
+    /validates documentation before publishing/i,
+    /target-unavailable diagnostic/i,
   );
 });

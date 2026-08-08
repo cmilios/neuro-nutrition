@@ -6,6 +6,8 @@ completed week's Meal Review can then shape the user's Next Weekly Plan.
 
 [Open the live beta](https://cmilios.github.io/neuro-nutrition/)
 
+![Synthetic NeuroNutrition Weekly Plan showing Monday meal cards and nutrition targets](docs/wiki/assets/weekly-plan-overview.svg)
+
 ## Safety boundary
 
 NeuroNutrition provides general meal-planning guidance. It is not medical
@@ -41,6 +43,7 @@ npm run build
 
 ## Documentation
 
+- [User guide](https://github.com/cmilios/neuro-nutrition/wiki)
 - [Developer setup and testing](docs/development.md)
 - [Contribution guide](CONTRIBUTING.md)
 - [Domain language and product concepts](CONTEXT.md)
