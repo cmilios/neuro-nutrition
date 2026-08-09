@@ -50,6 +50,7 @@ npm run build
 - [System architecture and trust boundaries](docs/architecture.md)
 - [Privacy and security: current technical boundaries](docs/privacy-and-security.md)
 - [Private vulnerability reporting](SECURITY.md)
+- [Documentation ownership and semantic evidence](docs/semantic-evidence-checklist.md)
 - [Deployment and local backend operations](DEPLOYMENT.md)
 - [OAuth verification matrix](docs/oauth/verification-matrix.md)
 - [OAuth release checklist](docs/oauth/release-checklist.md)

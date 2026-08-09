@@ -102,6 +102,7 @@ const validateRequiredNavigation = async () => {
     "docs/development.md",
     "CONTRIBUTING.md",
     "docs/privacy-and-security.md",
+    "docs/semantic-evidence-checklist.md",
     "SECURITY.md",
   ]) {
     if (!destinations.has(destination)) {
@@ -110,6 +111,36 @@ const validateRequiredNavigation = async () => {
         1,
         "required-navigation",
         `Landing page must link to ${destination}`,
+      );
+    }
+  }
+};
+
+const validateSemanticEvidenceChecklist = async () => {
+  const file = path.join(root, "docs", "semantic-evidence-checklist.md");
+  const contents = await readRequiredFile(
+    file,
+    "semantic-evidence",
+    "Semantic evidence checklist is missing",
+  );
+  if (contents === null) return;
+
+  const requiredHeadings = [
+    "Behavioral claims",
+    "Health-safety claims",
+    "Privacy claims",
+    "Supabase claims",
+    "Environment claims",
+    "Deployment claims",
+  ];
+  for (const heading of requiredHeadings) {
+    const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`^#{2,6}\\s+${escapedHeading}\\s*$`, "im").test(contents)) {
+      reportFailure(
+        file,
+        1,
+        "semantic-evidence",
+        `Checklist must cover ${heading}`,
       );
     }
   }
@@ -217,6 +248,10 @@ const markdownDestinations = (contents) =>
     alt: link.alt,
   }));
 
+const hasMeaningfulImageAlt = (alt) =>
+  alt.trim().length >= 20
+  && !/^(?:image|photo|screenshot|weekly plan)$/i.test(alt.trim());
+
 const validateWikiBundle = async () => {
   const wikiRoot = path.join(root, "docs", "wiki");
   const pages = new Map();
@@ -298,10 +333,7 @@ const validateWikiBundle = async () => {
         "wiki-image-alt",
         `Home must include ${representativeWikiAsset} with meaningful alternative text`,
       );
-    } else if (
-      image.alt.trim().length < 20
-      || /^(?:image|photo|screenshot|weekly plan)$/i.test(image.alt.trim())
-    ) {
+    } else if (!hasMeaningfulImageAlt(image.alt)) {
       reportFailure(
         path.join(wikiRoot, "Home.md"),
         image.lineNumber,
@@ -317,17 +349,24 @@ const validateWikiBundle = async () => {
     "README.md is required",
   );
   const sharedAssetDestination = `docs/wiki/${representativeWikiAsset}`;
-  if (
-    readme !== null
-    && !markdownDestinations(readme).some(
+  const sharedImage = readme === null
+    ? null
+    : markdownDestinations(readme).find(
       ({ destination, alt }) => destination === sharedAssetDestination && alt !== null,
-    )
-  ) {
+    );
+  if (!sharedImage) {
     reportFailure(
       path.join(root, "README.md"),
       1,
       "wiki-bundle",
       `Landing page must reference the shared Wiki asset: ${sharedAssetDestination}`,
+    );
+  } else if (!hasMeaningfulImageAlt(sharedImage.alt)) {
+    reportFailure(
+      path.join(root, "README.md"),
+      sharedImage.lineNumber,
+      "wiki-image-alt",
+      "Landing page image needs meaningful alternative text",
     );
   }
 };
@@ -526,6 +565,7 @@ await validateRequiredNavigation();
 await validateWikiBundle();
 await validateWikiPublication();
 await validatePublicIssueTemplates();
+await validateSemanticEvidenceChecklist();
 
 if (failures.length > 0) {
   console.error(failures.join("\n"));
