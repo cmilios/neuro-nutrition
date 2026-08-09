@@ -1,5 +1,11 @@
 # OAuth Verification Test Matrix
 
+**Audience:** maintainers and authorized operators verifying Google or Apple
+sign-in.
+
+**Purpose:** map the provider lifecycle and rollout contracts to executable
+automatic and manual verification cases.
+
 Verification matrix for Google and Apple sign-in, resolving map ticket
 [#56](https://github.com/cmilios/neuro-nutrition/issues/56) under the map
 [Add Google and Apple sign-in safely](https://github.com/cmilios/neuro-nutrition/issues/42).

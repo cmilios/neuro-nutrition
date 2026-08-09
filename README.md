@@ -1,5 +1,12 @@
 # NeuroNutrition
 
+**Audience:** prospective users, repository visitors, maintainers, and approved
+contributors.
+
+**Purpose:** explain what the beta does, state its safety and maturity
+boundaries, provide the shortest local start, and route readers to the owning
+documentation.
+
 NeuroNutrition is an early-stage beta that uses AI-Assisted Meal Planning to
 create a personalized seven-day Weekly Plan from a user's Health Profile. A
 completed week's Meal Review can then shape the user's Next Weekly Plan.
@@ -15,6 +22,9 @@ advice, diagnosis, or treatment. People with medical dietary needs should
 consult a qualified clinician or dietitian. Allergy and dietary-restriction
 inputs do not guarantee ingredient safety, so users must verify ingredients
 independently.
+
+The user guide's [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
+page owns the maintained health and allergy-safety guidance.
 
 Because this is an early-stage beta, behavior and availability may change.
 
@@ -50,6 +60,7 @@ npm run build
 - [System architecture and trust boundaries](docs/architecture.md)
 - [Privacy and security: current technical boundaries](docs/privacy-and-security.md)
 - [Private vulnerability reporting](SECURITY.md)
+- [Documentation ownership and semantic evidence](docs/semantic-evidence-checklist.md)
 - [Deployment and local backend operations](DEPLOYMENT.md)
 - [OAuth verification matrix](docs/oauth/verification-matrix.md)
 - [OAuth release checklist](docs/oauth/release-checklist.md)

@@ -90,7 +90,7 @@ Use the [structured documentation report](https://github.com/cmilios/neuro-nutri
 Name the Wiki page or repository document, identify the unclear or inaccurate
 section, and describe the correction you expected.
 
-Public issues are not an account-support inbox. **Do not include Health Profile
-data, email addresses, tokens, authorization codes, raw provider errors, or
-sensitive screenshots.** Remove private details from browser-console output and
-images before deciding whether any remaining evidence is safe to share.
+Public issues are not an account-support inbox. Follow the owning
+[Privacy and Safety no-share guidance](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety#report-problems-safely)
+before submitting anything. Remove private details from browser-console output
+and images before deciding whether any remaining evidence is safe to share.

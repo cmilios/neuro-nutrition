@@ -1,9 +1,11 @@
 # Developer guide
 
-This guide is for maintainers and approved contributors who need to run,
-understand, and verify NeuroNutrition. The [project landing page](../README.md)
-owns the short product introduction; this document owns local development and
-testing guidance.
+**Audience:** maintainers and approved contributors who need to run,
+understand, and verify NeuroNutrition.
+
+**Purpose:** own local development, repository-orientation, and testing
+guidance. The [project landing page](../README.md) owns the short product
+introduction.
 
 ## Prerequisites
 

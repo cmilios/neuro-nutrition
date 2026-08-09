@@ -1,5 +1,10 @@
 # OAuth Release Checklist (Gate B: `verify` → `on`)
 
+**Audience:** authorized operators deciding whether to promote one OAuth
+provider from `verify` to `on`.
+
+**Purpose:** provide the evidence-bearing manual gate for provider promotion.
+
 Operator gate checklist for promoting a single provider ("Continue with Google"
 or "Continue with Apple") from `verify` to `on`. It materializes the **manual
 tier** cases **M1–M13** from

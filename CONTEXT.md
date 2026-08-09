@@ -1,5 +1,10 @@
 # NeuroNutrition
 
+**Audience:** maintainers and approved contributors naming product behavior.
+
+**Purpose:** define the canonical domain vocabulary used in code, tests,
+issues, and documentation.
+
 NeuroNutrition creates personalized meal plans and uses a completed week's experience to shape the following week.
 
 ## Language

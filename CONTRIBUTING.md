@@ -1,9 +1,13 @@
 # Contributing to NeuroNutrition
 
-This guide is for project maintainers and approved contributors. NeuroNutrition
-is publicly visible but currently has no license; do not treat the repository as
-open-source software or assume permission to copy, redistribute, or create
-derivative works.
+**Audience:** project maintainers and approved contributors.
+
+**Purpose:** define the issue-led contribution workflow, verification duties,
+and documentation definition of done.
+
+NeuroNutrition is publicly visible but currently has no license; do not treat
+the repository as open-source software or assume permission to copy,
+redistribute, or create derivative works.
 
 ## Start with a GitHub Issue
 
@@ -34,10 +38,8 @@ into the branch. Preserve existing worktree changes that are not yours.
 - Follow the [developer guide](docs/development.md) for setup, repository
   orientation, and the testing strategy.
 - Use the canonical product language in [CONTEXT.md](CONTEXT.md).
-- Keep browser code free of secrets. Do not include tokens, authorization codes,
-  email addresses, raw provider errors, credentials, personal Health Profile
-  data, or client-confidential information in code, tests, documentation,
-  screenshots, issues, logs, or artifacts.
+- Keep browser code and repository artifacts within the owning
+  [privacy and security evidence boundary](docs/privacy-and-security.md#telemetry-exclusions).
 - Add or update tests at the user-visible or public contract seam when behavior
   changes. Avoid tests coupled to private implementation details.
 - Update the owning documentation whenever behavior, setup, configuration,

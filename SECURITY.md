@@ -1,5 +1,10 @@
 # Security policy
 
+**Audience:** people reporting a suspected NeuroNutrition vulnerability.
+
+**Purpose:** direct security-sensitive reports to the private channel and state
+what evidence is safe to provide.
+
 ## Report vulnerabilities privately
 
 Use GitHub's

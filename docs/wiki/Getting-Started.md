@@ -60,6 +60,9 @@ ingredient safety. Check ingredients, labels, quantities, and suitability for
 your needs before cooking or eating. Consult a qualified clinician or dietitian
 for medical dietary needs.
 
+Read the maintained [Privacy and Safety guidance](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
+before entering Health Profile information.
+
 ## 6. Return later
 
 Sign in with the same account to load its Current Weekly Plan. On a shared

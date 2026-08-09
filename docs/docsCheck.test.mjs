@@ -19,6 +19,17 @@ const baseFixture = {
   ].join("\n"),
   "docs/privacy-and-security.md": "# Privacy and security\n\n[Security reporting](../SECURITY.md)\n",
   "SECURITY.md": "# Security policy\n\n[Privacy and security](docs/privacy-and-security.md)\n",
+  "docs/semantic-evidence-checklist.md": [
+    "# Semantic evidence checklist",
+    "",
+    "## Behavioral claims",
+    "## Health-safety claims",
+    "## Privacy claims",
+    "## Supabase claims",
+    "## Environment claims",
+    "## Deployment claims",
+    "",
+  ].join("\n"),
   "docs/wiki/Home.md": [
     "# Home",
     "",
@@ -286,6 +297,32 @@ test("the landing page must navigate to the technical privacy and security sourc
   );
 });
 
+test("the semantic evidence checklist is required and reachable from the landing page", async () => {
+  await expectContractFailure(
+    {
+      "README.md": "# Example project\n",
+      "docs/semantic-evidence-checklist.md": null,
+    },
+    /docs\/semantic-evidence-checklist\.md:1 \[semantic-evidence\]/,
+    /semantic evidence checklist is missing/i,
+    /README\.md:1 \[required-navigation\].*semantic-evidence-checklist\.md/i,
+  );
+});
+
+test("the semantic evidence checklist covers every required evidence class", async () => {
+  await expectContractFailure(
+    {
+      "docs/semantic-evidence-checklist.md": "# Semantic evidence checklist\n\n## Behavioral claims\n",
+    },
+    /docs\/semantic-evidence-checklist\.md:1 \[semantic-evidence\]/,
+    /Health-safety claims/i,
+    /Privacy claims/i,
+    /Supabase claims/i,
+    /Environment claims/i,
+    /Deployment claims/i,
+  );
+});
+
 test("the Wiki privacy summary must link to its repository technical source", async () => {
   await expectContractFailure(
     { "docs/wiki/Privacy-and-Safety.md": "# Privacy and Safety\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n" },
@@ -360,6 +397,21 @@ test("the representative Wiki image requires meaningful alternative text", async
       ].join("\n"),
     },
     /docs\/wiki\/Home\.md:3 \[wiki-image-alt\]/,
+    /meaningful alternative text/i,
+  );
+});
+
+test("the landing page shared image requires meaningful alternative text", async () => {
+  await expectContractFailure(
+    {
+      "README.md": [
+        "# Example project",
+        "",
+        "![Screenshot](docs/wiki/assets/weekly-plan-overview.png)",
+        "",
+      ].join("\n"),
+    },
+    /README\.md:3 \[wiki-image-alt\]/,
     /meaningful alternative text/i,
   );
 });

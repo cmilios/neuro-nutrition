@@ -16,7 +16,8 @@ the authoritative saved version.
 
 Choose a day to see its four Meal Slots: breakfast, lunch, dinner, and snack.
 The summary above the cards and the calories, protein, carbohydrate, and fat
-figures are planning estimates, not medical advice.
+figures are planning estimates, not medical advice. Follow the maintained
+[Privacy and Safety guidance](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety).
 
 ## Open a Meal Slot
 

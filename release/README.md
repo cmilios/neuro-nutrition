@@ -1,5 +1,10 @@
 # Immutable release-candidate rehearsal
 
+**Audience:** authorized operators and maintainers working on release tooling.
+
+**Purpose:** explain the fail-closed rehearsal, observation, and delivery-gate
+tools that support the operator procedure in [`DEPLOYMENT.md`](../DEPLOYMENT.md).
+
 Issue #23 is a fail-closed approval gate. This workflow creates one candidate,
 rehearses it only in an isolated production-like Supabase project, and emits a
 reviewable `go` or `no-go` report. It never deploys to, migrates, or changes the
