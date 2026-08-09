@@ -29,6 +29,37 @@ function bearerToken(request: Request): string | null {
 }
 
 type JsonObject = Record<string, unknown>;
+export type PostgrestCredential = {
+  apiKey: string;
+  authorization?: string;
+};
+
+export function createPostgrestRpc(options: {
+  supabaseUrl: string;
+  credential: PostgrestCredential;
+  fetch: typeof globalThis.fetch;
+}) {
+  return async (name: string): Promise<JsonObject> => {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      apikey: options.credential.apiKey,
+    };
+    if (options.credential.authorization) {
+      headers.authorization = options.credential.authorization;
+    }
+
+    const response = await options.fetch(
+      `${options.supabaseUrl}/rest/v1/rpc/${name}`,
+      {
+        method: "POST",
+        headers,
+        body: "{}",
+      },
+    );
+    if (!response.ok) throw new Error(`RPC ${name} failed`);
+    return await response.json() as JsonObject;
+  };
+}
 
 export function createObservationProbeHandler(options: {
   expectedTokenHash: string;

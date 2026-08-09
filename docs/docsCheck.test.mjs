@@ -5,6 +5,14 @@ import { spawnSync } from "node:child_process";
 import { expect, test } from "vitest";
 
 const validatorPath = path.resolve("docs/check.mjs");
+const validPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+const damagedPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVSH2mNk+A8AAQUBAT0jcMwAAAAASUVORK5CYII=",
+  "base64",
+);
 const baseFixture = {
   "package.json": JSON.stringify({ scripts: { "docs:check": "node docs/check.mjs" } }),
   ".env.example": "VITE_PUBLIC_URL=https://example.test\n",
@@ -68,7 +76,7 @@ const baseFixture = {
     "- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)",
     "",
   ].join("\n"),
-  "docs/wiki/assets/weekly-plan-overview.png": "synthetic image fixture\n",
+  "docs/wiki/assets/weekly-plan-overview.png": validPng,
   ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug report\ndescription: Safe report\nbody:\n  - type: textarea\n    attributes:\n      description: Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.\n    validations:\n      required: true\n",
   ".github/ISSUE_TEMPLATE/documentation.yml": "name: Documentation report\ndescription: Safe report\nbody:\n  - type: textarea\n    attributes:\n      description: Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.\n    validations:\n      required: true\n",
   ".github/workflows/publish-wiki.yml": [
@@ -413,6 +421,22 @@ test("the landing page shared image requires meaningful alternative text", async
     },
     /README\.md:3 \[wiki-image-alt\]/,
     /meaningful alternative text/i,
+  );
+});
+
+test("a corrupted representative Wiki image fails the publication bundle", async () => {
+  await expectContractFailure(
+    { "docs/wiki/assets/weekly-plan-overview.png": "not a PNG\n" },
+    /docs\/wiki\/assets\/weekly-plan-overview\.png:1 \[wiki-image-file\]/,
+    /valid PNG/i,
+  );
+});
+
+test("damaged PNG payload bytes fail the publication bundle", async () => {
+  await expectContractFailure(
+    { "docs/wiki/assets/weekly-plan-overview.png": damagedPng },
+    /docs\/wiki\/assets\/weekly-plan-overview\.png:1 \[wiki-image-file\]/,
+    /valid PNG/i,
   );
 });
 
