@@ -5,3 +5,4 @@
 - [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
 - [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)
 - [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)
+- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)

@@ -98,7 +98,12 @@ const validateRequiredNavigation = async () => {
     ),
   );
 
-  for (const destination of ["docs/development.md", "CONTRIBUTING.md"]) {
+  for (const destination of [
+    "docs/development.md",
+    "CONTRIBUTING.md",
+    "docs/privacy-and-security.md",
+    "SECURITY.md",
+  ]) {
     if (!destinations.has(destination)) {
       reportFailure(
         readme,
@@ -118,9 +123,11 @@ const requiredWikiPages = [
   "Using-Your-Weekly-Plan.md",
   "Reviewing-Your-Week.md",
   "Start-Over.md",
+  "Privacy-and-Safety.md",
   "_Sidebar.md",
 ];
 const representativeWikiAsset = "assets/weekly-plan-overview.png";
+const technicalPrivacySource = "https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md";
 const publishedWikiPages = new Map([
   ["https://github.com/cmilios/neuro-nutrition/wiki", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Home", "Home.md"],
@@ -130,6 +137,7 @@ const publishedWikiPages = new Map([
   ["https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan", "Using-Your-Weekly-Plan.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week", "Reviewing-Your-Week.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Start-Over", "Start-Over.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety", "Privacy-and-Safety.md"],
 ]);
 
 const readRequiredFile = async (file, contract, message) => {
@@ -238,6 +246,7 @@ const validateWikiBundle = async () => {
       "Using-Your-Weekly-Plan.md",
       "Reviewing-Your-Week.md",
       "Start-Over.md",
+      "Privacy-and-Safety.md",
     ]],
     ["Getting-Started.md", ["Home.md"]],
     ["Account-and-Settings.md", ["Home.md", "Troubleshooting.md"]],
@@ -245,6 +254,7 @@ const validateWikiBundle = async () => {
     ["Using-Your-Weekly-Plan.md", ["Home.md"]],
     ["Reviewing-Your-Week.md", ["Home.md"]],
     ["Start-Over.md", ["Home.md"]],
+    ["Privacy-and-Safety.md", ["Home.md", technicalPrivacySource]],
     ["_Sidebar.md", [
       "Home.md",
       "Getting-Started.md",
@@ -253,6 +263,7 @@ const validateWikiBundle = async () => {
       "Using-Your-Weekly-Plan.md",
       "Reviewing-Your-Week.md",
       "Start-Over.md",
+      "Privacy-and-Safety.md",
     ]],
   ];
   for (const [page, requiredDestinations] of navigationContract) {
@@ -267,7 +278,9 @@ const validateWikiBundle = async () => {
           path.join(wikiRoot, page),
           1,
           "wiki-navigation",
-          `Wiki navigation must link to ${destination}`,
+          destination === technicalPrivacySource
+            ? "Wiki navigation must link to the technical privacy and security source"
+            : `Wiki navigation must link to ${destination}`,
         );
       }
     }

@@ -6,7 +6,8 @@ does, its safety limits, and where to begin._
 [Open the NeuroNutrition beta](https://cmilios.github.io/neuro-nutrition/) ·
 [Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started) ·
 [Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings) ·
-[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)
+[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting) ·
+[Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
 
 NeuroNutrition uses AI-Assisted Meal Planning to propose a seven-day Weekly Plan
 from your Health Profile. The beta is still changing, so features and

@@ -13,7 +13,12 @@ const baseFixture = {
     "",
     "![A synthetic Weekly Plan showing Monday meals](docs/wiki/assets/weekly-plan-overview.png)",
     "",
+    "[Privacy and security](docs/privacy-and-security.md)",
+    "[Security reporting](SECURITY.md)",
+    "",
   ].join("\n"),
+  "docs/privacy-and-security.md": "# Privacy and security\n\n[Security reporting](../SECURITY.md)\n",
+  "SECURITY.md": "# Security policy\n\n[Privacy and security](docs/privacy-and-security.md)\n",
   "docs/wiki/Home.md": [
     "# Home",
     "",
@@ -25,6 +30,7 @@ const baseFixture = {
     "[Use your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
     "[Review your week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
     "[Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
+    "[Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)",
     "",
   ].join("\n"),
   "docs/wiki/Getting-Started.md": "# Getting Started\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
@@ -33,6 +39,13 @@ const baseFixture = {
   "docs/wiki/Using-Your-Weekly-Plan.md": "# Using Your Weekly Plan\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Reviewing-Your-Week.md": "# Reviewing Your Week\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Start-Over.md": "# Start Over\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Privacy-and-Safety.md": [
+    "# Privacy and Safety",
+    "",
+    "[Technical details](https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md)",
+    "[Return home](https://github.com/cmilios/neuro-nutrition/wiki)",
+    "",
+  ].join("\n"),
   "docs/wiki/_Sidebar.md": [
     "- [Home](https://github.com/cmilios/neuro-nutrition/wiki)",
     "- [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)",
@@ -41,6 +54,7 @@ const baseFixture = {
     "- [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
     "- [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
     "- [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
+    "- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)",
     "",
   ].join("\n"),
   "docs/wiki/assets/weekly-plan-overview.png": "synthetic image fixture\n",
@@ -186,6 +200,14 @@ test("a missing Account and Settings page identifies the publication bundle cont
   );
 });
 
+test("a missing Privacy and Safety page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Privacy-and-Safety.md": null },
+    /docs\/wiki\/Privacy-and-Safety\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
 test("a missing Troubleshooting page identifies the publication bundle contract", async () => {
   await expectContractFailure(
     { "docs/wiki/Troubleshooting.md": null },
@@ -252,6 +274,23 @@ test("a missing Start Over page identifies the publication bundle contract", asy
     { "docs/wiki/Start-Over.md": null },
     /docs\/wiki\/Start-Over\.md:1 \[wiki-bundle\]/,
     /required Wiki page is missing/i,
+  );
+});
+
+test("the landing page must navigate to the technical privacy and security sources", async () => {
+  await expectContractFailure(
+    { "README.md": "# Example project\n" },
+    /README\.md:1 \[required-navigation\]/,
+    /docs\/privacy-and-security\.md/,
+    /SECURITY\.md/,
+  );
+});
+
+test("the Wiki privacy summary must link to its repository technical source", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Privacy-and-Safety.md": "# Privacy and Safety\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n" },
+    /docs\/wiki\/Privacy-and-Safety\.md:1 \[wiki-navigation\]/,
+    /technical privacy and security source/i,
   );
 });
 
