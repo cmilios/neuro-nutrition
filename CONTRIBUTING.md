@@ -38,10 +38,8 @@ into the branch. Preserve existing worktree changes that are not yours.
 - Follow the [developer guide](docs/development.md) for setup, repository
   orientation, and the testing strategy.
 - Use the canonical product language in [CONTEXT.md](CONTEXT.md).
-- Keep browser code free of secrets. Do not include tokens, authorization codes,
-  email addresses, raw provider errors, credentials, personal Health Profile
-  data, or client-confidential information in code, tests, documentation,
-  screenshots, issues, logs, or artifacts.
+- Keep browser code and repository artifacts within the owning
+  [privacy and security evidence boundary](docs/privacy-and-security.md#telemetry-exclusions).
 - Add or update tests at the user-visible or public contract seam when behavior
   changes. Avoid tests coupled to private implementation details.
 - Update the owning documentation whenever behavior, setup, configuration,

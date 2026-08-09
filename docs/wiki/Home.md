@@ -27,6 +27,9 @@ Entering an allergy or dietary restriction does not guarantee ingredient
 safety. Check every suggested ingredient and product label yourself before
 cooking or eating.
 
+[Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
+owns the maintained health and allergy-safety guidance.
+
 ## Access your account
 
 Use a sign-in method currently offered on the opening screen. Provider

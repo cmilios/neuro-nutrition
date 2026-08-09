@@ -37,7 +37,10 @@ claim or silently expanding documentation work into a product change.
 | Documentation ownership and semantic traceability | This checklist | Maintainers reviewing claims that cannot be validated mechanically. |
 
 Detailed facts stay with the owner above. Other documents should summarize only
-what their audience needs and link to the owner for the maintained detail.
+what their audience needs and link to the owner for the maintained detail. A
+minimum health or privacy warning may be repeated at the point where a reader
+makes a safety-sensitive decision, but it must link to its owner and must not
+introduce independent detail.
 
 ## Screenshot source
 
@@ -61,15 +64,15 @@ not prove that pixels are current or synthetic.
 
 | Claim under review | Owner | Current evidence | Human check |
 | --- | --- | --- | --- |
-| NeuroNutrition is described as AI-Assisted Meal Planning, not medical advice, diagnosis, treatment, or an AI nutritionist. | [`CONTEXT.md`](../CONTEXT.md) | Canonical definitions in [`CONTEXT.md`](../CONTEXT.md) and the public landing/Wiki safety summaries. | Search every intended public document for prohibited or stronger health claims and review generated examples for implied medical authority. |
-| Allergy and dietary-restriction inputs are not presented as an ingredient-safety guarantee. | [Privacy and Safety](wiki/Privacy-and-Safety.md) | Profile inputs in [`components/ProfileForm.tsx`](../components/ProfileForm.tsx) and prompt construction in [`supabase/functions/generate-meal-plan/index.ts`](../supabase/functions/generate-meal-plan/index.ts). | Confirm user guidance requires independent ingredient and label checks and does not claim the generator enforces safety. |
+| The canonical product term is AI-Assisted Meal Planning; prohibited synonyms do not imply an AI nutritionist or medical authority. | [`CONTEXT.md`](../CONTEXT.md) | Canonical definitions in [`CONTEXT.md`](../CONTEXT.md) and terminology used by the public landing/Wiki summaries. | Search every intended public document for prohibited or stronger product claims. |
+| User guidance states the medical-advice boundary and that allergy or dietary-restriction inputs are not an ingredient-safety guarantee. | [Privacy and Safety](wiki/Privacy-and-Safety.md) | Profile inputs in [`components/ProfileForm.tsx`](../components/ProfileForm.tsx), prompt construction in [`supabase/functions/generate-meal-plan/index.ts`](../supabase/functions/generate-meal-plan/index.ts), and linked point-of-decision summaries. | Confirm summaries link here, require independent ingredient and label checks, and do not claim that the generator enforces safety. |
 
 ## Privacy claims
 
 | Claim under review | Owner | Current evidence | Human check |
 | --- | --- | --- | --- |
 | The saved-data inventory, AI-generation inputs, browser copies, telemetry exclusions, and deletion limitations match current implementation. | [`docs/privacy-and-security.md`](privacy-and-security.md) | Evidence links in that document to application services, Edge Functions, migrations, storage boundaries, and tests. | Follow each evidence link; do not infer hosted retention, encryption, deletion, or provider behavior that the repository cannot prove. |
-| Public reports and documentation examples exclude secrets, tokens, authorization codes, email addresses, raw provider errors, Health Profile data, and sensitive screenshots. | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | The user-facing summary in [Troubleshooting](wiki/Troubleshooting.md), structured forms under [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/), and validation in [`docs/check.mjs`](check.mjs). | Inspect prose, images, fixtures, issue forms, and proposed evidence before publication; automated string checks are only a minimum guard. |
+| Public reports exclude passwords, session links, tokens, email addresses, Health Profile details, personal screenshots, and raw provider errors. | [Privacy and Safety](wiki/Privacy-and-Safety.md) | Linked contributor and troubleshooting summaries, structured forms under [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/), and validation in [`docs/check.mjs`](check.mjs). | Inspect prose, images, fixtures, issue forms, and proposed evidence before publication; automated string checks are only a minimum guard. |
 | Suspected vulnerabilities have a private reporting route. | [`SECURITY.md`](../SECURITY.md) | GitHub repository private-vulnerability-reporting setting and the linked advisory form. | Verify the live setting before claiming availability; never redirect vulnerability details to a public issue. |
 
 ## Supabase claims

@@ -23,6 +23,9 @@ consult a qualified clinician or dietitian. Allergy and dietary-restriction
 inputs do not guarantee ingredient safety, so users must verify ingredients
 independently.
 
+The user guide's [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
+page owns the maintained health and allergy-safety guidance.
+
 Because this is an early-stage beta, behavior and availability may change.
 
 ## Five-minute quick start
