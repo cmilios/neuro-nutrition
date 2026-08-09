@@ -1,5 +1,10 @@
 # Apple Client-Secret Rotation Runbook
 
+**Audience:** authorized operators responsible for Apple sign-in credentials.
+
+**Purpose:** rotate the Apple client-secret JWT safely before expiry and verify
+the resulting provider state.
+
 Owner-driven runbook for rotating the Apple **client-secret JWT** that backs
 "Continue with Apple" before it expires. It resolves the rotation deliverable of
 [#59](https://github.com/cmilios/neuro-nutrition/issues/59) under the parent

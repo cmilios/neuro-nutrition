@@ -1,9 +1,11 @@
 # Privacy and security: current technical boundaries
 
-_For maintainers, contributors, and security reviewers. This document describes
-the data-handling behavior evidenced by the current repository. It is not a
-legal privacy policy, terms of service, medical disclaimer, compliance
-statement, or production-readiness certification._
+**Audience:** maintainers, contributors, and security reviewers.
+
+**Purpose:** describe the data-handling behavior evidenced by the current
+repository. This document is not a legal privacy policy, terms of service,
+medical disclaimer, compliance statement, or production-readiness
+certification.
 
 This account was checked against the repository's application code, tests,
 configuration, and migrations on 2026-08-09. Repository evidence does not prove

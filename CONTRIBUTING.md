@@ -1,9 +1,13 @@
 # Contributing to NeuroNutrition
 
-This guide is for project maintainers and approved contributors. NeuroNutrition
-is publicly visible but currently has no license; do not treat the repository as
-open-source software or assume permission to copy, redistribute, or create
-derivative works.
+**Audience:** project maintainers and approved contributors.
+
+**Purpose:** define the issue-led contribution workflow, verification duties,
+and documentation definition of done.
+
+NeuroNutrition is publicly visible but currently has no license; do not treat
+the repository as open-source software or assume permission to copy,
+redistribute, or create derivative works.
 
 ## Start with a GitHub Issue
 

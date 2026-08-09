@@ -1,5 +1,12 @@
 # NeuroNutrition
 
+**Audience:** prospective users, repository visitors, maintainers, and approved
+contributors.
+
+**Purpose:** explain what the beta does, state its safety and maturity
+boundaries, provide the shortest local start, and route readers to the owning
+documentation.
+
 NeuroNutrition is an early-stage beta that uses AI-Assisted Meal Planning to
 create a personalized seven-day Weekly Plan from a user's Health Profile. A
 completed week's Meal Review can then shape the user's Next Weekly Plan.
