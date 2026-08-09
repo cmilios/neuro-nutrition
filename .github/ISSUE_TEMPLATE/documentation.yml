@@ -1,0 +1,64 @@
+name: Documentation report
+description: Report inaccurate, missing, or unclear NeuroNutrition guidance
+title: "[Docs]: "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for improving the NeuroNutrition documentation. This is a public issue.
+
+        **Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.** Do not include private account details to illustrate a wording problem.
+
+  - type: input
+    id: page
+    attributes:
+      label: Page or document
+      description: Link the public Wiki page or name the repository document.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: problem
+    attributes:
+      label: Documentation problem
+      options:
+        - Inaccurate behavior
+        - Missing guidance
+        - Unclear instructions
+        - Broken link or navigation
+        - Accessibility problem
+        - Other documentation problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: What is wrong or unclear?
+      description: Quote only the minimum public documentation text needed to identify the section.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What guidance did you expect?
+      description: Describe the task the documentation should help a reader complete.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public evidence
+      description: Optional links to public code, tests, or configuration. Do not upload account screenshots.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Public-report safety
+      options:
+        - label: I removed private, health, authentication, provider, and sensitive screenshot data from this report.
+          required: true

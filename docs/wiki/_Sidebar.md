@@ -1,2 +1,4 @@
 - [Home](https://github.com/cmilios/neuro-nutrition/wiki)
 - [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
+- [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)
+- [Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)
