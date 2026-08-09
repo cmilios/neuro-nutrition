@@ -98,7 +98,12 @@ const validateRequiredNavigation = async () => {
     ),
   );
 
-  for (const destination of ["docs/development.md", "CONTRIBUTING.md"]) {
+  for (const destination of [
+    "docs/development.md",
+    "CONTRIBUTING.md",
+    "docs/privacy-and-security.md",
+    "SECURITY.md",
+  ]) {
     if (!destinations.has(destination)) {
       reportFailure(
         readme,
@@ -113,19 +118,26 @@ const validateRequiredNavigation = async () => {
 const requiredWikiPages = [
   "Home.md",
   "Getting-Started.md",
+  "Account-and-Settings.md",
+  "Troubleshooting.md",
   "Using-Your-Weekly-Plan.md",
   "Reviewing-Your-Week.md",
   "Start-Over.md",
+  "Privacy-and-Safety.md",
   "_Sidebar.md",
 ];
 const representativeWikiAsset = "assets/weekly-plan-overview.png";
+const technicalPrivacySource = "https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md";
 const publishedWikiPages = new Map([
   ["https://github.com/cmilios/neuro-nutrition/wiki", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Home", "Home.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started", "Getting-Started.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings", "Account-and-Settings.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting", "Troubleshooting.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan", "Using-Your-Weekly-Plan.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week", "Reviewing-Your-Week.md"],
   ["https://github.com/cmilios/neuro-nutrition/wiki/Start-Over", "Start-Over.md"],
+  ["https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety", "Privacy-and-Safety.md"],
 ]);
 
 const readRequiredFile = async (file, contract, message) => {
@@ -134,6 +146,65 @@ const readRequiredFile = async (file, contract, message) => {
   } catch {
     reportFailure(file, 1, contract, message);
     return null;
+  }
+};
+
+const validatePublicIssueTemplates = async () => {
+  const templates = [
+    ["bug_report.yml", "Structured bug report template is missing"],
+    ["documentation.yml", "Structured documentation report template is missing"],
+  ];
+  const prohibitedEvidence = [
+    "Health Profile data",
+    "email addresses",
+    "tokens",
+    "authorization codes",
+    "raw provider errors",
+    "sensitive screenshots",
+  ];
+
+  for (const [template, missingMessage] of templates) {
+    const file = path.join(root, ".github", "ISSUE_TEMPLATE", template);
+    const contents = await readRequiredFile(file, "public-reporting", missingMessage);
+    if (contents === null) continue;
+
+    const structuredFormContracts = [
+      /^name:\s*\S/im,
+      /^description:\s*\S/im,
+      /^body:\s*$/im,
+      /^\s+- type:\s*(?:input|textarea|dropdown|checkboxes)\s*$/im,
+      /^\s+validations:\s*$/im,
+      /^\s+required:\s*true\s*$/im,
+    ];
+    if (!structuredFormContracts.every((contract) => contract.test(contents))) {
+      reportFailure(
+        file,
+        1,
+        "public-reporting",
+        "Template must remain a structured issue form with required evidence",
+      );
+    }
+
+    if (!/\bdo not (?:include|post|share)\b/i.test(contents)) {
+      reportFailure(
+        file,
+        1,
+        "public-reporting",
+        "Template needs an explicit do-not-share instruction",
+      );
+    }
+
+    const missingEvidence = prohibitedEvidence.filter(
+      (term) => !contents.toLowerCase().includes(term.toLowerCase()),
+    );
+    if (missingEvidence.length > 0) {
+      reportFailure(
+        file,
+        1,
+        "public-reporting",
+        `Template must prohibit: ${missingEvidence.join(", ")}`,
+      );
+    }
   }
 };
 
@@ -170,20 +241,29 @@ const validateWikiBundle = async () => {
   const navigationContract = [
     ["Home.md", [
       "Getting-Started.md",
+      "Account-and-Settings.md",
+      "Troubleshooting.md",
       "Using-Your-Weekly-Plan.md",
       "Reviewing-Your-Week.md",
       "Start-Over.md",
+      "Privacy-and-Safety.md",
     ]],
     ["Getting-Started.md", ["Home.md"]],
+    ["Account-and-Settings.md", ["Home.md", "Troubleshooting.md"]],
+    ["Troubleshooting.md", ["Home.md", "Account-and-Settings.md"]],
     ["Using-Your-Weekly-Plan.md", ["Home.md"]],
     ["Reviewing-Your-Week.md", ["Home.md"]],
     ["Start-Over.md", ["Home.md"]],
+    ["Privacy-and-Safety.md", ["Home.md", technicalPrivacySource]],
     ["_Sidebar.md", [
       "Home.md",
       "Getting-Started.md",
+      "Account-and-Settings.md",
+      "Troubleshooting.md",
       "Using-Your-Weekly-Plan.md",
       "Reviewing-Your-Week.md",
       "Start-Over.md",
+      "Privacy-and-Safety.md",
     ]],
   ];
   for (const [page, requiredDestinations] of navigationContract) {
@@ -198,7 +278,9 @@ const validateWikiBundle = async () => {
           path.join(wikiRoot, page),
           1,
           "wiki-navigation",
-          `Wiki navigation must link to ${destination}`,
+          destination === technicalPrivacySource
+            ? "Wiki navigation must link to the technical privacy and security source"
+            : `Wiki navigation must link to ${destination}`,
         );
       }
     }
@@ -268,6 +350,8 @@ const validateWikiPublication = async () => {
     [/GitHub Wiki target unavailable/i, "Workflow needs a target-unavailable diagnostic"],
     [/\bdocs\/wiki\//, "Workflow must publish the repository-authored Wiki source"],
     [/Inspect rendered Wiki/i, "Workflow must inspect the rendered Wiki after publication"],
+    [/Account-and-Settings/i, "Workflow must inspect the rendered Account and Settings page"],
+    [/Troubleshooting/i, "Workflow must inspect the rendered Troubleshooting page"],
     [/Using-Your-Weekly-Plan/, "Workflow must inspect Using Your Weekly Plan after publication"],
     [/Reviewing-Your-Week/, "Workflow must inspect Reviewing Your Week after publication"],
     [/Start-Over/, "Workflow must inspect Start Over after publication"],
@@ -441,6 +525,7 @@ for (const document of await listMarkdown(root)) {
 await validateRequiredNavigation();
 await validateWikiBundle();
 await validateWikiPublication();
+await validatePublicIssueTemplates();
 
 if (failures.length > 0) {
   console.error(failures.join("\n"));

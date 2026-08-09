@@ -48,6 +48,8 @@ npm run build
 - [Contribution guide](CONTRIBUTING.md)
 - [Domain language and product concepts](CONTEXT.md)
 - [System architecture and trust boundaries](docs/architecture.md)
+- [Privacy and security: current technical boundaries](docs/privacy-and-security.md)
+- [Private vulnerability reporting](SECURITY.md)
 - [Deployment and local backend operations](DEPLOYMENT.md)
 - [OAuth verification matrix](docs/oauth/verification-matrix.md)
 - [OAuth release checklist](docs/oauth/release-checklist.md)

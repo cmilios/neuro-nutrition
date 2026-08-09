@@ -13,31 +13,53 @@ const baseFixture = {
     "",
     "![A synthetic Weekly Plan showing Monday meals](docs/wiki/assets/weekly-plan-overview.png)",
     "",
+    "[Privacy and security](docs/privacy-and-security.md)",
+    "[Security reporting](SECURITY.md)",
+    "",
   ].join("\n"),
+  "docs/privacy-and-security.md": "# Privacy and security\n\n[Security reporting](../SECURITY.md)\n",
+  "SECURITY.md": "# Security policy\n\n[Privacy and security](docs/privacy-and-security.md)\n",
   "docs/wiki/Home.md": [
     "# Home",
     "",
     "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.png)",
     "",
     "[Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)",
+    "[Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)",
+    "[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)",
     "[Use your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
     "[Review your week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
     "[Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
+    "[Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)",
     "",
   ].join("\n"),
   "docs/wiki/Getting-Started.md": "# Getting Started\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Account-and-Settings.md": "# Account and Settings\n\n[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Troubleshooting.md": "# Troubleshooting\n\n[Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Using-Your-Weekly-Plan.md": "# Using Your Weekly Plan\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Reviewing-Your-Week.md": "# Reviewing Your Week\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Start-Over.md": "# Start Over\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Privacy-and-Safety.md": [
+    "# Privacy and Safety",
+    "",
+    "[Technical details](https://github.com/cmilios/neuro-nutrition/blob/main/docs/privacy-and-security.md)",
+    "[Return home](https://github.com/cmilios/neuro-nutrition/wiki)",
+    "",
+  ].join("\n"),
   "docs/wiki/_Sidebar.md": [
     "- [Home](https://github.com/cmilios/neuro-nutrition/wiki)",
     "- [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)",
+    "- [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)",
+    "- [Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)",
     "- [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
     "- [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
     "- [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
+    "- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)",
     "",
   ].join("\n"),
   "docs/wiki/assets/weekly-plan-overview.png": "synthetic image fixture\n",
+  ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug report\ndescription: Safe report\nbody:\n  - type: textarea\n    attributes:\n      description: Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.\n    validations:\n      required: true\n",
+  ".github/ISSUE_TEMPLATE/documentation.yml": "name: Documentation report\ndescription: Safe report\nbody:\n  - type: textarea\n    attributes:\n      description: Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.\n    validations:\n      required: true\n",
   ".github/workflows/publish-wiki.yml": [
     "name: Publish Wiki",
     "on:",
@@ -57,7 +79,7 @@ const baseFixture = {
     "      - run: echo 'GitHub Wiki target unavailable'",
     "      - run: rsync docs/wiki/ wiki-target/",
     "      - name: Inspect rendered Wiki",
-    "        run: curl https://example.test/wiki",
+    "        run: curl https://example.test/wiki/Account-and-Settings && curl https://example.test/wiki/Troubleshooting",
     "",
   ].join("\n"),
 };
@@ -170,6 +192,67 @@ test("a missing required Wiki page identifies the publication bundle contract", 
   );
 });
 
+test("a missing Account and Settings page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Account-and-Settings.md": null },
+    /docs\/wiki\/Account-and-Settings\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("a missing Privacy and Safety page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Privacy-and-Safety.md": null },
+    /docs\/wiki\/Privacy-and-Safety\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("a missing Troubleshooting page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Troubleshooting.md": null },
+    /docs\/wiki\/Troubleshooting\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("a missing structured bug report identifies the public reporting contract", async () => {
+  await expectContractFailure(
+    { ".github/ISSUE_TEMPLATE/bug_report.yml": null },
+    /\.github\/ISSUE_TEMPLATE\/bug_report\.yml:1 \[public-reporting\]/,
+    /structured bug report template is missing/i,
+  );
+});
+
+test("a missing structured documentation report identifies the public reporting contract", async () => {
+  await expectContractFailure(
+    { ".github/ISSUE_TEMPLATE/documentation.yml": null },
+    /\.github\/ISSUE_TEMPLATE\/documentation\.yml:1 \[public-reporting\]/,
+    /structured documentation report template is missing/i,
+  );
+});
+
+test("public issue templates prohibit sensitive account and Health Profile evidence", async () => {
+  await expectContractFailure(
+    {
+      ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug report\nbody: Describe the problem.\n",
+      ".github/ISSUE_TEMPLATE/documentation.yml": "name: Documentation report\nbody: Describe the page.\n",
+    },
+    /\.github\/ISSUE_TEMPLATE\/bug_report\.yml:1 \[public-reporting\].*explicit do-not-share instruction/i,
+    /\.github\/ISSUE_TEMPLATE\/documentation\.yml:1 \[public-reporting\].*Health Profile data/i,
+    /\.github\/ISSUE_TEMPLATE\/documentation\.yml:1 \[public-reporting\].*sensitive screenshots/i,
+  );
+});
+
+test("public issue templates remain structured forms with required evidence", async () => {
+  await expectContractFailure(
+    {
+      ".github/ISSUE_TEMPLATE/bug_report.yml": "name: Bug report\ndescription: Safe report\nbody: Do not include Health Profile data, email addresses, tokens, authorization codes, raw provider errors, or sensitive screenshots.\n",
+    },
+    /\.github\/ISSUE_TEMPLATE\/bug_report\.yml:1 \[public-reporting\].*structured issue form/i,
+  );
+});
+
 test("a missing Weekly Plan journey page identifies the publication bundle contract", async () => {
   await expectContractFailure(
     { "docs/wiki/Using-Your-Weekly-Plan.md": null },
@@ -194,11 +277,50 @@ test("a missing Start Over page identifies the publication bundle contract", asy
   );
 });
 
+test("the landing page must navigate to the technical privacy and security sources", async () => {
+  await expectContractFailure(
+    { "README.md": "# Example project\n" },
+    /README\.md:1 \[required-navigation\]/,
+    /docs\/privacy-and-security\.md/,
+    /SECURITY\.md/,
+  );
+});
+
+test("the Wiki privacy summary must link to its repository technical source", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Privacy-and-Safety.md": "# Privacy and Safety\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n" },
+    /docs\/wiki\/Privacy-and-Safety\.md:1 \[wiki-navigation\]/,
+    /technical privacy and security source/i,
+  );
+});
+
 test("Wiki Home must navigate to Getting Started", async () => {
   await expectContractFailure(
     { "docs/wiki/Home.md": "# Home\n" },
     /docs\/wiki\/Home\.md:1 \[wiki-navigation\]/,
     /Getting-Started\.md/,
+  );
+});
+
+test("Wiki Home and sidebar navigate to Account and Troubleshooting guidance", async () => {
+  await expectContractFailure(
+    {
+      "docs/wiki/Home.md": [
+        "# Home",
+        "",
+        "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.png)",
+        "",
+        "[Get started](Getting-Started.md)",
+        "",
+      ].join("\n"),
+      "docs/wiki/_Sidebar.md": [
+        "- [Home](Home.md)",
+        "- [Getting Started](Getting-Started.md)",
+        "",
+      ].join("\n"),
+    },
+    /docs\/wiki\/Home\.md:1 \[wiki-navigation\].*Account-and-Settings\.md/,
+    /docs\/wiki\/_Sidebar\.md:1 \[wiki-navigation\].*Troubleshooting\.md/,
   );
 });
 
@@ -261,6 +383,33 @@ test("the Wiki publication workflow carries the recovery and safety contract", a
     /validates documentation before publishing/i,
     /target-unavailable diagnostic/i,
     /inspect the rendered Wiki/i,
+  );
+});
+
+test("the Wiki publication workflow inspects Account and Troubleshooting pages", async () => {
+  await expectContractFailure(
+    {
+      ".github/workflows/publish-wiki.yml": [
+        "name: Publish Wiki",
+        "on:",
+        "  workflow_dispatch:",
+        "permissions:",
+        "  contents: write",
+        "concurrency:",
+        "  group: wiki-publication",
+        "jobs:",
+        "  publish:",
+        "    steps:",
+        "      - run: npm run docs:check",
+        "      - run: echo 'GitHub Wiki target unavailable'",
+        "      - run: rsync docs/wiki/ wiki-target/",
+        "      - name: Inspect rendered Wiki",
+        "        run: curl https://example.test/wiki/Getting-Started",
+        "",
+      ].join("\n"),
+    },
+    /\.github\/workflows\/publish-wiki\.yml:1 \[wiki-publication\].*Account and Settings/i,
+    /\.github\/workflows\/publish-wiki\.yml:1 \[wiki-publication\].*Troubleshooting/i,
   );
 });
 

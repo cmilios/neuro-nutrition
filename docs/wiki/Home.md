@@ -4,7 +4,10 @@ _For people using the NeuroNutrition beta. This page explains what the product
 does, its safety limits, and where to begin._
 
 [Open the NeuroNutrition beta](https://cmilios.github.io/neuro-nutrition/) ·
-[Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
+[Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started) ·
+[Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings) ·
+[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting) ·
+[Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
 
 NeuroNutrition uses AI-Assisted Meal Planning to propose a seven-day Weekly Plan
 from your Health Profile. The beta is still changing, so features and
@@ -26,10 +29,11 @@ cooking or eating.
 
 ## Access your account
 
-Use a sign-in method currently offered on the opening screen. Email and password
-access is supported. Google or Apple may also appear while those methods are
-available; if a button is absent or marked unavailable, use another offered
-method. New email accounts may need confirmation before the first sign-in.
+Use a sign-in method currently offered on the opening screen. Provider
+availability can change during the beta; if a button is absent or marked
+unavailable, use another offered method. [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)
+owns the current availability details. New email accounts may need confirmation
+before the first sign-in.
 
 After signing in, the app may ask you to choose a Display Name before loading
 your account. Enter the name you want NeuroNutrition to use, then select
@@ -66,3 +70,6 @@ Continue with the step-by-step
 
 Use the account menu to log out of the current browser session. On a shared
 device, always log out when you finish.
+
+For password recovery, connected sign-in methods, appearance, and other account
+controls, read [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings).

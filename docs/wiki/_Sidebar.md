@@ -1,5 +1,8 @@
 - [Home](https://github.com/cmilios/neuro-nutrition/wiki)
 - [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)
+- [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)
+- [Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)
 - [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
 - [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)
 - [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)
+- [Privacy and Safety](https://github.com/cmilios/neuro-nutrition/wiki/Privacy-and-Safety)
