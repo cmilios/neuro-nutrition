@@ -22,16 +22,25 @@ const baseFixture = {
     "[Get started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)",
     "[Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)",
     "[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)",
+    "[Use your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
+    "[Review your week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
+    "[Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
     "",
   ].join("\n"),
   "docs/wiki/Getting-Started.md": "# Getting Started\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Account-and-Settings.md": "# Account and Settings\n\n[Troubleshoot a problem](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/Troubleshooting.md": "# Troubleshooting\n\n[Manage your account](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Using-Your-Weekly-Plan.md": "# Using Your Weekly Plan\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Reviewing-Your-Week.md": "# Reviewing Your Week\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
+  "docs/wiki/Start-Over.md": "# Start Over\n\n[Return home](https://github.com/cmilios/neuro-nutrition/wiki)\n",
   "docs/wiki/_Sidebar.md": [
     "- [Home](https://github.com/cmilios/neuro-nutrition/wiki)",
     "- [Getting Started](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started)",
     "- [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)",
     "- [Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)",
+    "- [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)",
+    "- [Reviewing Your Week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)",
+    "- [Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)",
     "",
   ].join("\n"),
   "docs/wiki/assets/weekly-plan-overview.png": "synthetic image fixture\n",
@@ -222,6 +231,30 @@ test("public issue templates remain structured forms with required evidence", as
   );
 });
 
+test("a missing Weekly Plan journey page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Using-Your-Weekly-Plan.md": null },
+    /docs\/wiki\/Using-Your-Weekly-Plan\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("a missing Meal Review page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Reviewing-Your-Week.md": null },
+    /docs\/wiki\/Reviewing-Your-Week\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
+test("a missing Start Over page identifies the publication bundle contract", async () => {
+  await expectContractFailure(
+    { "docs/wiki/Start-Over.md": null },
+    /docs\/wiki\/Start-Over\.md:1 \[wiki-bundle\]/,
+    /required Wiki page is missing/i,
+  );
+});
+
 test("Wiki Home must navigate to Getting Started", async () => {
   await expectContractFailure(
     { "docs/wiki/Home.md": "# Home\n" },
@@ -249,6 +282,29 @@ test("Wiki Home and sidebar navigate to Account and Troubleshooting guidance", a
     },
     /docs\/wiki\/Home\.md:1 \[wiki-navigation\].*Account-and-Settings\.md/,
     /docs\/wiki\/_Sidebar\.md:1 \[wiki-navigation\].*Troubleshooting\.md/,
+  );
+});
+
+test("Wiki Home and sidebar navigate to every Weekly Plan journey page", async () => {
+  await expectContractFailure(
+    {
+      "docs/wiki/Home.md": [
+        "# Home",
+        "",
+        "![A synthetic Weekly Plan showing Monday meals](assets/weekly-plan-overview.png)",
+        "",
+        "[Get started](Getting-Started.md)",
+        "",
+      ].join("\n"),
+      "docs/wiki/_Sidebar.md": [
+        "- [Home](Home.md)",
+        "- [Getting Started](Getting-Started.md)",
+        "",
+      ].join("\n"),
+    },
+    /docs\/wiki\/Home\.md:1 \[wiki-navigation\].*Using-Your-Weekly-Plan\.md/,
+    /docs\/wiki\/_Sidebar\.md:1 \[wiki-navigation\].*Reviewing-Your-Week\.md/,
+    /docs\/wiki\/_Sidebar\.md:1 \[wiki-navigation\].*Start-Over\.md/,
   );
 });
 

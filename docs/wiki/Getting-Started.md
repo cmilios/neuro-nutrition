@@ -48,6 +48,10 @@ the app provides a recoverable error.
 The Weekly Plan contains breakfast, lunch, dinner, and a snack for each day.
 Open a meal card to see its ingredients and preparation details.
 
+Continue with [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
+for ingredient progress, Meal Reroll, milestones, and the path to a Next Weekly
+Plan.
+
 ## 5. Check every meal before using it
 
 AI-Assisted Meal Planning provides general guidance, not medical advice,

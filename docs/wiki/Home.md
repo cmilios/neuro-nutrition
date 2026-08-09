@@ -54,6 +54,17 @@ manually.
 Continue with the step-by-step
 [Getting Started guide](https://github.com/cmilios/neuro-nutrition/wiki/Getting-Started).
 
+## Follow the Weekly Plan journey
+
+- [Use your Current Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
+  to navigate Meal Slots, open meal details, track ingredients and milestones,
+  and request a Meal Reroll.
+- [Review your week](https://github.com/cmilios/neuro-nutrition/wiki/Reviewing-Your-Week)
+  to classify Cooked, Liked, Disliked, and Uncooked Meals and understand how a
+  Next Weekly Plan balances retention with variety.
+- [Understand Start Over](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)
+  before removing the Current Weekly Plan.
+
 ## Need to leave the app?
 
 Use the account menu to log out of the current browser session. On a shared
