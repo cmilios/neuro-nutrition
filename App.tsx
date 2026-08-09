@@ -25,6 +25,7 @@ import {
 } from './types';
 import {
   generateInitialWeeklyPlan,
+  recoverInitialWeeklyPlan,
   generateNextWeeklyPlan,
   replaceWeeklyPlanFromProfile,
   rerollMeal,
@@ -138,6 +139,8 @@ const App: React.FC = () => {
   } | null>(null);
   const [pendingMealRerolls, setPendingMealRerolls] =
     useState<MealRerollReservation[]>([]);
+  const [pendingInitialGenerationId, setPendingInitialGenerationId] =
+    useState<string | null>(null);
   const [nextWeekRetry, setNextWeekRetry] = useState<
     Omit<NextWeeklyPlanCommand, 'commandId'> & {
     commandId: string | null;
@@ -342,6 +345,7 @@ const App: React.FC = () => {
         setPendingNextGenerationId(null);
         setRerollRetry(null);
         setPendingMealRerolls([]);
+        setPendingInitialGenerationId(null);
         setPendingIngredientIds([]);
         initialGenerationCommandRef.current = null;
         profileReplacementCommandRef.current = null;
@@ -494,11 +498,13 @@ const App: React.FC = () => {
     Promise.all([
       weeklyPlanGateway.getCurrent(user.id),
       weeklyPlanGateway.getPendingMealRerolls(user.id),
+      weeklyPlanGateway.getPendingInitialGeneration(),
     ])
-      .then(([currentPlan, reservations]) => {
+      .then(([currentPlan, reservations, pendingInitialCommandId]) => {
         if (cancelled || loadedUserIdRef.current !== user.id) return;
         try {
           setPendingMealRerolls(reservations);
+          setPendingInitialGenerationId(pendingInitialCommandId);
           if (!currentPlan) {
             clearAuthoritativePlan(user.id);
             setPlanAuthorityStatus('confirmed-empty');
@@ -536,12 +542,14 @@ const App: React.FC = () => {
 
       refetchInFlight = true;
       try {
-        const [currentPlan, reservations] = await Promise.all([
+        const [currentPlan, reservations, pendingInitialCommandId] = await Promise.all([
           weeklyPlanGateway.getCurrent(user.id),
           weeklyPlanGateway.getPendingMealRerolls(user.id),
+          weeklyPlanGateway.getPendingInitialGeneration(),
         ]);
         if (cancelled) return;
         setPendingMealRerolls(reservations);
+        setPendingInitialGenerationId(pendingInitialCommandId);
         setRerollRetry((current) =>
           current?.commandId
           && !reservations.some((reservation) =>
@@ -725,6 +733,7 @@ const App: React.FC = () => {
       setPendingNextGenerationId(null);
       setRerollRetry(null);
       setPendingMealRerolls([]);
+      setPendingInitialGenerationId(null);
       setPendingIngredientIds([]);
       initialGenerationCommandRef.current = null;
       profileReplacementCommandRef.current = null;
@@ -908,6 +917,194 @@ const App: React.FC = () => {
     authoritativePlan?.healthProfileReplacementId,
     authoritativePlan?.planId,
     authoritativePlan?.revision,
+    profile,
+    user?.id,
+  ]);
+
+  useEffect(() => {
+    if (
+      !user
+      || planAuthorityStatus !== 'confirmed-empty'
+      || !pendingInitialGenerationId
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    let replayTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const replay = async () => {
+      try {
+        const outcome = await recoverInitialWeeklyPlan(
+          pendingInitialGenerationId,
+        );
+        if (cancelled) return;
+        if (outcome.status === 'succeeded' && outcome.result) {
+          initialGenerationCommandRef.current = null;
+          setPendingInitialGenerationId(null);
+          setIsLoading(false);
+          applyAuthoritativePlan(outcome.result, user.id);
+          return;
+        }
+        if (outcome.status === 'in_progress') {
+          replayTimer = setTimeout(() => void replay(), 60_000);
+          return;
+        }
+
+        initialGenerationCommandRef.current = null;
+        setPendingInitialGenerationId(null);
+        setIsLoading(false);
+        setError(
+          outcome.error?.message
+            ?? 'Initial Weekly Plan recovery did not produce a committed plan.',
+        );
+        requestPlanRefetchRef.current?.();
+      } catch {
+        if (cancelled) return;
+        reportUnknownCommandOutcome('generate_initial');
+        replayTimer = setTimeout(() => void replay(), 60_000);
+      }
+    };
+
+    setIsLoading(true);
+    void replay();
+    return () => {
+      cancelled = true;
+      if (replayTimer) clearTimeout(replayTimer);
+    };
+  }, [
+    pendingInitialGenerationId,
+    planAuthorityStatus,
+    user?.id,
+  ]);
+
+  useEffect(() => {
+    const commandId = authoritativePlan?.nextGenerationId;
+    if (!user || !profile || !authoritativePlan || !commandId) return;
+
+    let cancelled = false;
+    let replayTimer: ReturnType<typeof setTimeout> | null = null;
+    const sourcePlan = authoritativePlan;
+
+    const replay = async () => {
+      try {
+        const outcome = await generateNextWeeklyPlan(profile, {
+          commandId,
+          displayedPlanId: sourcePlan.planId,
+          displayedRevision: sourcePlan.revision,
+          feedback: [],
+          currentPlan: sourcePlan.document,
+          reviewType: 'empty',
+          resumeExisting: true,
+        });
+        if (cancelled) return;
+        if (outcome.status === 'succeeded' && outcome.result) {
+          reconcilingNextGenerationIdRef.current = null;
+          setPendingNextGenerationId(null);
+          setNextWeekRetry(null);
+          applyAuthoritativePlan(outcome.result, user.id);
+          return;
+        }
+        if (outcome.status === 'in_progress') {
+          replayTimer = setTimeout(() => void replay(), 60_000);
+          return;
+        }
+
+        reconcilingNextGenerationIdRef.current = null;
+        setPendingNextGenerationId(null);
+        setNextWeekRetry(null);
+        setError(
+          outcome.error?.message
+            ?? 'Next Weekly Plan recovery did not produce a committed plan.',
+        );
+        requestPlanRefetchRef.current?.();
+      } catch {
+        if (cancelled) return;
+        reportUnknownCommandOutcome('generate_next');
+        replayTimer = setTimeout(() => void replay(), 60_000);
+      }
+    };
+
+    reconcilingNextGenerationIdRef.current = commandId;
+    setPendingNextGenerationId(commandId);
+    void replay();
+    return () => {
+      cancelled = true;
+      if (replayTimer) clearTimeout(replayTimer);
+    };
+  }, [
+    authoritativePlan?.nextGenerationId,
+    authoritativePlan?.planId,
+    authoritativePlan?.revision,
+    profile,
+    user?.id,
+  ]);
+
+  useEffect(() => {
+    if (!user || !profile || !authoritativePlan || pendingMealRerolls.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const replayTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    const replay = async (reservation: MealRerollReservation) => {
+      try {
+        const outcome = await rerollMeal(profile, {
+          commandId: reservation.commandId,
+          displayedPlanId: reservation.planId,
+          displayedRevision: authoritativePlan.revision,
+          day: reservation.day,
+          mealType: reservation.mealType,
+          resumeExisting: true,
+        });
+        if (cancelled) return;
+        if (outcome.status === 'succeeded' && outcome.result) {
+          applyAuthoritativePlan(outcome.result, user.id);
+          setPendingMealRerolls((current) => current.filter(
+            (pending) => pending.commandId !== reservation.commandId,
+          ));
+          setRerollRetry(null);
+          return;
+        }
+        if (outcome.status === 'in_progress') {
+          replayTimers.set(
+            reservation.commandId,
+            setTimeout(() => void replay(reservation), 60_000),
+          );
+          return;
+        }
+
+        setPendingMealRerolls((current) => current.filter(
+          (pending) => pending.commandId !== reservation.commandId,
+        ));
+        setRerollRetry(null);
+        setError(
+          outcome.error?.message
+            ?? 'Meal Reroll recovery did not change the Meal Slot.',
+        );
+        requestPlanRefetchRef.current?.();
+      } catch {
+        if (cancelled) return;
+        reportUnknownCommandOutcome('reroll_meal');
+        replayTimers.set(
+          reservation.commandId,
+          setTimeout(() => void replay(reservation), 60_000),
+        );
+      }
+    };
+
+    for (const reservation of pendingMealRerolls) {
+      void replay(reservation);
+    }
+    return () => {
+      cancelled = true;
+      for (const timer of replayTimers.values()) clearTimeout(timer);
+    };
+  }, [
+    authoritativePlan?.planId,
+    authoritativePlan?.revision,
+    pendingMealRerolls,
     profile,
     user?.id,
   ]);
@@ -1389,7 +1586,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {!mealPlan && !isLoading && planAuthorityStatus === 'confirmed-empty' && (
+        {!mealPlan && !isLoading && !pendingInitialGenerationId
+          && planAuthorityStatus === 'confirmed-empty' && (
           <ProfileForm initialData={profile} onSubmit={handleProfileSubmit} isLoading={isLoading} />
         )}
 

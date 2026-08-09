@@ -56,6 +56,7 @@ vi.mock("./services/weeklyPlanGateway", () => ({
   ),
   weeklyPlanGateway: {
     getCurrent,
+    getPendingInitialGeneration: vi.fn().mockResolvedValue(null),
     getPendingMealRerolls,
     createCurrent: vi.fn(),
     saveCurrent: vi.fn(),
@@ -141,7 +142,12 @@ describe("Next Weekly Plan client lifecycle", () => {
       },
       milestones: [],
     });
-    generateNextWeeklyPlan.mockReset();
+    generateNextWeeklyPlan.mockReset().mockResolvedValue({
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "in_progress",
+      result: null,
+      error: null,
+    });
     realtimeInvalidations.length = 0;
   });
 
@@ -159,6 +165,43 @@ describe("Next Weekly Plan client lifecycle", () => {
       .toBeInTheDocument();
     expect(screen.getByText("plan-read-only")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next Week" })).toBeDisabled();
+  });
+
+  it("reconciles a remotely locked Next Weekly Plan with its persisted command identity", async () => {
+    const lockedCommandId = "10000000-0000-4000-8000-000000000001";
+    getCurrent
+      .mockResolvedValueOnce(row({
+        nextGenerationId: lockedCommandId,
+        nextGenerationLockedAt: "2026-07-27T10:01:00.000Z",
+      }))
+      .mockResolvedValue(row());
+    generateNextWeeklyPlan.mockResolvedValue({
+      commandId: lockedCommandId,
+      status: "failed",
+      result: null,
+      error: {
+        code: "provider_outcome_unrecoverable",
+        message: "No Next Weekly Plan was committed.",
+        retryable: false,
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(generateNextWeeklyPlan).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({
+          commandId: lockedCommandId,
+          displayedPlanId: "20000000-0000-4000-8000-000000000001",
+          displayedRevision: 0,
+          resumeExisting: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText("plan-editable")).toBeInTheDocument();
+    });
   });
 
   it("keeps the source visible and read-only during local generation, then applies the successor", async () => {

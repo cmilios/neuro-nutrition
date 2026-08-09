@@ -253,4 +253,53 @@ describe("initial Weekly Plan generation command HTTP contract", () => {
     expect(commandStore.fail).not.toHaveBeenCalled();
     expect(commandStore.checkpoint).toHaveBeenCalledTimes(1);
   });
+
+  it("recovers a persisted initial command identity without reconstructing input or calling the provider", async () => {
+    const commandStore = {
+      ...store(),
+      recover: vi.fn().mockResolvedValue({
+        commandId,
+        status: "failed",
+        result: null,
+        error: {
+          code: "provider_outcome_unrecoverable",
+          message: "No Current Weekly Plan was committed.",
+          retryable: false,
+        },
+        shouldGenerate: false,
+        checkpoint: null,
+        inputFingerprint: "a".repeat(64),
+      }),
+    };
+    const generate = vi.fn();
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-1" }),
+      generate,
+      persist: vi.fn(),
+      initialGeneration: commandStore,
+    });
+
+    const response = await handler(request({
+      action: "plan",
+      commandId,
+      profile: {},
+      resumeExisting: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      commandId,
+      status: "failed",
+      error: {
+        code: "provider_outcome_unrecoverable",
+        retryable: false,
+      },
+    });
+    expect(commandStore.recover).toHaveBeenCalledWith({
+      commandId,
+      userId: "user-1",
+    });
+    expect(commandStore.begin).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
 });

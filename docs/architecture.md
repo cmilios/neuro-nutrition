@@ -325,7 +325,8 @@ sequenceDiagram
     Edge-->>App: 503; command remains pending
     App->>Edge: User retry reuses command UUID while page state survives
     Edge->>Commands: Replay without another provider call
-    Commands-->>App: No automated terminal reconciliation; operator repair pending issue 80
+    App->>Commands: Rediscover owner-scoped pending command and request recovery
+    Commands-->>App: Repair a committed plan, or terminally fail after the stale threshold
   end
 ```
 
@@ -364,7 +365,8 @@ sequenceDiagram
     Edge-->>App: 503; reservation remains visible through read and Realtime paths
     App->>Edge: Immediate replay or user retry with same command UUID
     Edge->>Commands: Replay without another provider call
-    Commands-->>App: No automated terminal reconciliation; operator repair pending issue 80
+    App->>Commands: Rediscover reservation and request recovery
+    Commands-->>App: Replay a durable checkpoint, or terminally release the reservation
   end
   Commands-->>App: Outcome plus full authoritative row when succeeded
 ```
@@ -403,7 +405,8 @@ sequenceDiagram
     Edge-->>App: 503; source remains active, visible, and read-only
     App->>Edge: Retry same command identity
     Edge->>Commands: Replay checkpoint without provider work
-    Commands-->>App: No wired stale recovery; operator repair pending issue 80
+    App->>Commands: Rediscover source lock and request recovery
+    Commands-->>App: Replay a durable checkpoint, repair a successor, or terminally release the lock
   end
   Commands-->>App: Outcome plus successor when succeeded
 ```
@@ -494,22 +497,31 @@ preserves the Health Profile, milestones, AI Usage Records, and inactive plan
 history. Once an authoritative read confirms empty, the ordinary initial
 generation gate applies again.
 
-### Recovery limits and follow-up work
+### Recovery contract and limits
 
-The current implementation does not yet provide one complete reconciliation
-path for every provider-backed command. Health Profile Plan Replacement wires a
-stale-command recovery RPC into the Edge Function and the browser replay loop.
-The database also defines stale recovery for Next Weekly Plan, but the current
-Edge Function store does not expose or call it. Initial generation and Meal
-Reroll retain an immutable `unknown` checkpoint and prevent duplicate provider
-work, while their browser command IDs survive only the current page lifetime.
+Initial generation, Meal Reroll, and Next Weekly Plan now use the same recovery
+contract. The browser rediscovers the durable command ID from an owner-scoped
+pending-command RPC, the Meal Slot reservation, or the Current Weekly Plan
+lock, respectively. It asks the Edge Function to recover that exact command;
+the Edge Function calls a service-only recovery RPC and never recomputes the
+input fingerprint or authorizes provider work during recovery.
 
-This is safe with respect to duplicate generation—the reservation or lock stays
-closed—but it can leave work pending indefinitely and require operator repair.
-Completing automated reconciliation for initial generation, Meal Reroll, and
-Next Weekly Plan is tracked as [issue #80](https://github.com/cmilios/neuro-nutrition/issues/80).
-Documentation must not imply that a Realtime refetch, cache read, or retry with
-a fresh command ID resolves an unknown provider outcome.
+A durable success or failure checkpoint remains available for ordinary replay.
+After ten minutes, an `unknown` or missing checkpoint is reconciled only from
+database authority. A committed plan is repaired into a succeeded command. If
+no result was committed, the command becomes the non-retryable
+`provider_outcome_unrecoverable` terminal state, the lock or reservation is
+released, and sanitized evidence records only the recovery stage and stable
+reason. The browser refetches authority; it does not automatically create a
+fresh command. A later explicit user action is a new intent with a new command
+ID.
+
+This limit is deliberate because provider requests use `store: false`: an
+unknown transport result cannot be fetched later without retaining sensitive
+provider output. Realtime and cache state remain invalidation and display aids,
+not recovery evidence. The observation snapshot reports recent repaired and
+unrecoverable terminal recoveries, while stale command, lock, and reservation
+counts continue to fail the operational gate.
 
 ### Transitional rollout and legacy persistence
 

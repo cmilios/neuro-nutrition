@@ -4,6 +4,7 @@ import type { GenerationRecord } from "./handler";
 import {
   createHealthProfilePlanReplacementCommandStore,
   createInitialGenerationCommandStore,
+  createMealRerollCommandStore,
   createNextWeeklyPlanCommandStore,
   getWeeklyPlanRolloutState,
   persistUsageRecordToSupabase,
@@ -100,6 +101,43 @@ describe("AI Usage Record persistence", () => {
 });
 
 describe("initial generation command persistence", () => {
+  it("routes stale recovery through the dedicated service-only RPC", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "failed",
+      result: null,
+      error: {
+        code: "provider_outcome_unrecoverable",
+        message: "No Current Weekly Plan was committed.",
+        retryable: false,
+      },
+      shouldGenerate: false,
+      inputFingerprint: "a".repeat(64),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createInitialGenerationCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.recover!({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/recover_stale_initial_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: "00000000-0000-4000-8000-000000000001",
+          p_command_id: outcome.commandId,
+        }),
+      }),
+    );
+  });
+
   it("uses separate RPC requests for start and completion transactions", async () => {
     const pending = {
       commandId: "10000000-0000-4000-8000-000000000001",
@@ -266,6 +304,74 @@ describe("Next Weekly Plan command persistence", () => {
           p_input_fingerprint: "a".repeat(64),
           p_source_plan_id: "20000000-0000-4000-8000-000000000001",
           p_source_revision: 3,
+        }),
+      }),
+    );
+  });
+
+  it("routes stale recovery through the dedicated service-only RPC", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "failed",
+      result: null,
+      error: { code: "provider_outcome_unrecoverable", retryable: false },
+      shouldGenerate: false,
+      inputFingerprint: "a".repeat(64),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createNextWeeklyPlanCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.recover!({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/recover_stale_next_weekly_plan_generation",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: "00000000-0000-4000-8000-000000000001",
+          p_command_id: outcome.commandId,
+        }),
+      }),
+    );
+  });
+});
+
+describe("Meal Reroll command persistence", () => {
+  it("routes stale recovery through the dedicated service-only RPC", async () => {
+    const outcome = {
+      commandId: "10000000-0000-4000-8000-000000000001",
+      status: "failed",
+      result: null,
+      error: { code: "provider_outcome_unrecoverable", retryable: false },
+      shouldGenerate: false,
+      inputFingerprint: "a".repeat(64),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json(outcome));
+    const commandStore = createMealRerollCommandStore({
+      supabaseUrl: "https://example.supabase.co",
+      serviceRoleKey: "server-secret",
+      fetchImpl,
+    });
+
+    await commandStore.recover!({
+      commandId: outcome.commandId,
+      userId: "00000000-0000-4000-8000-000000000001",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://example.supabase.co/rest/v1/rpc/recover_stale_meal_reroll",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          p_user_id: "00000000-0000-4000-8000-000000000001",
+          p_command_id: outcome.commandId,
         }),
       }),
     );

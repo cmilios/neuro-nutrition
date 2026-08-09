@@ -38,7 +38,7 @@ const successor = () => {
   return result;
 };
 
-const request = () => new Request("http://localhost/generate", {
+const request = (overrides: Record<string, unknown> = {}) => new Request("http://localhost/generate", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -50,6 +50,7 @@ const request = () => new Request("http://localhost/generate", {
     currentPlan: weeklyPlanFixture,
     displayedPlanId: planId,
     displayedRevision: 0,
+    ...overrides,
   }),
 });
 
@@ -235,6 +236,49 @@ describe("durable Next Weekly Plan generation handler", () => {
       commandId,
       document,
     }));
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it("recovers a persisted Next Weekly Plan identity without another provider call", async () => {
+    const commandStore = {
+      ...store(),
+      recover: vi.fn().mockResolvedValue(pending({
+        status: "failed",
+        shouldGenerate: false,
+        source: null,
+        error: {
+          code: "provider_outcome_unrecoverable",
+          message: "No Next Weekly Plan was committed.",
+          retryable: false,
+        },
+        inputFingerprint: "a".repeat(64),
+      })),
+    };
+    const generate = vi.fn();
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-1" }),
+      generate,
+      persist: vi.fn(),
+      nextGeneration: commandStore,
+    });
+
+    const response = await handler(request({
+      profile: {},
+      feedback: [],
+      resumeExisting: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      commandId,
+      status: "failed",
+      error: { code: "provider_outcome_unrecoverable", retryable: false },
+    });
+    expect(commandStore.recover).toHaveBeenCalledWith({
+      commandId,
+      userId: "user-1",
+    });
+    expect(commandStore.begin).not.toHaveBeenCalled();
     expect(generate).not.toHaveBeenCalled();
   });
 });

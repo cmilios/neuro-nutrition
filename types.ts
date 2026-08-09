@@ -129,6 +129,7 @@ export interface MealRerollCommand {
   displayedRevision: number;
   day: string;
   mealType: MealType;
+  resumeExisting?: boolean;
 }
 
 export interface NextWeeklyPlanCommand {
@@ -138,6 +139,7 @@ export interface NextWeeklyPlanCommand {
   feedback: MealFeedback[];
   currentPlan: MealPlan;
   reviewType: 'empty' | 'partial';
+  resumeExisting?: boolean;
 }
 
 export interface HealthProfilePlanReplacementCommand {

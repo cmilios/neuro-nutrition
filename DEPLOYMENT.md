@@ -378,6 +378,32 @@ user journeys pass, monitoring passes, every OAuth provider being promoted has
 its own completed gate, and rollback evidence is ready. Any missing, stale, or
 contradictory evidence is **no-go**.
 
+### Weekly Plan command reconciliation
+
+The database observation snapshot reports stale commands, locks, reservations,
+and recent `recovery.repaired` / `recovery.unrecoverable` terminal outcomes. A
+stale count is an incident signal, not permission to edit command or plan rows.
+
+The application normally reconciles the durable command automatically. If an
+authorized operator must resume it, first confirm the command is still
+`in_progress`, is older than ten minutes, belongs to the expected user and
+operation, and has no unexplained committed result. Then invoke exactly one
+matching service-only RPC with the recorded user and command UUID:
+
+| Operation | Recovery RPC |
+| --- | --- |
+| Initial generation | `recover_stale_initial_weekly_plan_generation` |
+| Meal Reroll | `recover_stale_meal_reroll` |
+| Next Weekly Plan | `recover_stale_next_weekly_plan_generation` |
+
+Record only the command UUID, operation, timestamps, RPC outcome status/stable
+code, and observation evidence. Never record a Health Profile, Weekly Plan or
+meal document, provider payload, raw provider error, token, or credential. Do
+not clear a lock/reservation manually and do not issue a fresh command as an
+operator workaround. A recovery either repairs database-committed evidence or
+terminally records `provider_outcome_unrecoverable`; the browser then refetches
+authority, and any later fresh provider attempt requires explicit user intent.
+
 ## Rollback
 
 Rollback is a new, observable release. Record its commit, operator, reason,

@@ -170,6 +170,9 @@ export interface MealRerollCommandStore {
       evidence: Record<string, unknown>;
     },
   ): Promise<MealRerollCommandOutcome>;
+  recover?(
+    identity: Pick<InitialGenerationCommandIdentity, "commandId" | "userId">,
+  ): Promise<MealRerollCommandOutcome>;
 }
 
 export type InitialGenerationCheckpoint =
@@ -208,6 +211,9 @@ export interface InitialGenerationCommandStore {
       retryable: boolean;
       evidence: Record<string, unknown>;
     },
+  ): Promise<InitialGenerationCommandOutcome>;
+  recover?(
+    identity: Pick<InitialGenerationCommandIdentity, "commandId" | "userId">,
   ): Promise<InitialGenerationCommandOutcome>;
 }
 
@@ -718,10 +724,33 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           );
         }
 
+        let resumed: InitialGenerationCommandOutcome | null = null;
+        if (generationRequest.resumeExisting) {
+          if (!dependencies.initialGeneration.recover) {
+            throw new HttpError(
+              "Initial Weekly Plan generation recovery is unavailable.",
+              503,
+              "initial_generation_recovery_unavailable",
+            );
+          }
+          resumed = await dependencies.initialGeneration.recover({
+            commandId: generationRequest.commandId,
+            userId: user.id,
+          });
+          if (!resumed.inputFingerprint) {
+            throw new HttpError(
+              "The persisted initial generation identity is unavailable.",
+              503,
+              "initial_generation_recovery_identity_unavailable",
+            );
+          }
+        }
+
         const identity = {
           commandId: generationRequest.commandId,
           userId: user.id,
-          inputFingerprint: await fingerprintInitialGeneration(generationRequest),
+          inputFingerprint: resumed?.inputFingerprint
+            ?? await fingerprintInitialGeneration(generationRequest),
         };
         const finalizeCheckpoint = async (
           outcome: InitialGenerationCommandOutcome,
@@ -766,7 +795,8 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           return json(commandResponse(completed));
         };
 
-        const started = await dependencies.initialGeneration.begin(identity);
+        const started = resumed
+          ?? await dependencies.initialGeneration.begin(identity);
         if (!started.shouldGenerate) {
           return await finalizeCheckpoint(started);
         }
@@ -853,10 +883,33 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           );
         }
 
+        let resumed: NextWeeklyPlanCommandOutcome | null = null;
+        if (generationRequest.resumeExisting) {
+          if (!dependencies.nextGeneration.recover) {
+            throw new HttpError(
+              "Next Weekly Plan recovery is unavailable.",
+              503,
+              "next_generation_recovery_unavailable",
+            );
+          }
+          resumed = await dependencies.nextGeneration.recover({
+            commandId: generationRequest.commandId,
+            userId: user.id,
+          });
+          if (!resumed.inputFingerprint) {
+            throw new HttpError(
+              "The persisted Next Weekly Plan identity is unavailable.",
+              503,
+              "next_generation_recovery_identity_unavailable",
+            );
+          }
+        }
+
         const identity = {
           commandId: generationRequest.commandId,
           userId: user.id,
-          inputFingerprint: await fingerprintNextGeneration(generationRequest),
+          inputFingerprint: resumed?.inputFingerprint
+            ?? await fingerprintNextGeneration(generationRequest),
         };
         const finalizeCheckpoint = async (
           outcome: NextWeeklyPlanCommandOutcome,
@@ -901,11 +954,12 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           return json(commandResponse(completed));
         };
 
-        const started = await dependencies.nextGeneration.begin({
-          ...identity,
-          sourcePlanId: generationRequest.displayedPlanId,
-          sourceRevision: generationRequest.displayedRevision,
-        });
+        const started = resumed
+          ?? await dependencies.nextGeneration.begin({
+            ...identity,
+            sourcePlanId: generationRequest.displayedPlanId,
+            sourceRevision: generationRequest.displayedRevision,
+          });
         if (!started.shouldGenerate) {
           return await finalizeCheckpoint(started);
         }
@@ -1052,10 +1106,33 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           );
         }
 
+        let resumed: MealRerollCommandOutcome | null = null;
+        if (generationRequest.resumeExisting) {
+          if (!dependencies.mealReroll.recover) {
+            throw new HttpError(
+              "Meal Reroll recovery is unavailable.",
+              503,
+              "meal_reroll_recovery_unavailable",
+            );
+          }
+          resumed = await dependencies.mealReroll.recover({
+            commandId: generationRequest.commandId,
+            userId: user.id,
+          });
+          if (!resumed.inputFingerprint) {
+            throw new HttpError(
+              "The persisted Meal Reroll identity is unavailable.",
+              503,
+              "meal_reroll_recovery_identity_unavailable",
+            );
+          }
+        }
+
         const identity = {
           commandId: generationRequest.commandId,
           userId: user.id,
-          inputFingerprint: await fingerprintMealReroll(generationRequest),
+          inputFingerprint: resumed?.inputFingerprint
+            ?? await fingerprintMealReroll(generationRequest),
         };
         const finalizeCheckpoint = async (
           outcome: MealRerollCommandOutcome,
@@ -1102,13 +1179,14 @@ export function createGenerateMealPlanHandler(dependencies: GenerateMealPlanDepe
           return json(commandResponse(completed));
         };
 
-        const started = await dependencies.mealReroll.begin({
-          ...identity,
-          displayedPlanId: generationRequest.displayedPlanId,
-          displayedRevision: generationRequest.displayedRevision,
-          day: generationRequest.day,
-          mealType: generationRequest.mealType,
-        });
+        const started = resumed
+          ?? await dependencies.mealReroll.begin({
+            ...identity,
+            displayedPlanId: generationRequest.displayedPlanId,
+            displayedRevision: generationRequest.displayedRevision,
+            day: generationRequest.day,
+            mealType: generationRequest.mealType,
+          });
         if (!started.shouldGenerate) {
           return await finalizeCheckpoint(started);
         }

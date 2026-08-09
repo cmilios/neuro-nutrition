@@ -23,6 +23,8 @@ const migrationNames = [
   "20260730071422_add_observation_function_failure_probe.sql",
   "20260808155145_allow_oauth_auth_failure_incident.sql",
   "20260808155225_record_unauthenticated_oauth_incidents.sql",
+  "20260809084346_reconcile_unknown_weekly_plan_commands.sql",
+  "20260809085905_observe_weekly_plan_command_recovery.sql",
 ];
 const migrationPaths = migrationNames.map((name) =>
   fileURLToPath(new URL(`./${name}`, import.meta.url))
@@ -175,6 +177,7 @@ describe("Weekly Plan observation database contract", () => {
       rolloutState: "authoritative",
       planInvariants: { violations: 0 },
       migrationEvidence: { valid: true },
+      recovery: { repaired: 0, unrecoverable: 0 },
     }));
     const functionFailures = await database.query<{
       failures: { critical: number; total: number };
