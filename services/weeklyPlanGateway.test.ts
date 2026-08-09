@@ -4,11 +4,27 @@ import {
   createAuthoritativeWeeklyPlanReader,
   createIngredientProgressGateway,
   createMealRerollReservationReader,
+  createPendingInitialGenerationReader,
   createStartOverGateway,
   createWeeklyPlanInvalidationSubscription,
 } from "./weeklyPlanGateway";
 
 describe("Weekly Plan gateway", () => {
+  it("loads the authenticated user's pending initial command identity", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { commandId: "10000000-0000-4000-8000-000000000001" },
+      error: null,
+    });
+    const reader = createPendingInitialGenerationReader({ rpc } as never);
+
+    await expect(reader.getPendingInitialGeneration()).resolves.toBe(
+      "10000000-0000-4000-8000-000000000001",
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "get_pending_initial_weekly_plan_generation",
+    );
+  });
+
   it("loads pending Meal Slot reservations for remote presentation", async () => {
     const query = {
       select: vi.fn(),

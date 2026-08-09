@@ -172,6 +172,12 @@ export function createInitialGenerationCommandStore(
         p_failure_evidence: command.evidence,
       });
     },
+    recover(identity) {
+      return rpc("recover_stale_initial_weekly_plan_generation", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+      });
+    },
   };
 }
 
@@ -223,6 +229,12 @@ export function createMealRerollCommandStore(
         p_evidence: command.evidence,
       });
     },
+    recover(identity) {
+      return rpc("recover_stale_meal_reroll", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
+      });
+    },
   } as MealRerollCommandStore;
 }
 
@@ -270,6 +282,12 @@ export function createNextWeeklyPlanCommandStore(
         p_error_message: command.errorMessage,
         p_retryable: command.retryable,
         p_failure_evidence: command.evidence,
+      });
+    },
+    recover(identity) {
+      return rpc("recover_stale_next_weekly_plan_generation", {
+        p_user_id: identity.userId,
+        p_command_id: identity.commandId,
       });
     },
   };

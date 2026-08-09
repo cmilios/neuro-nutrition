@@ -84,6 +84,16 @@ export const generateInitialWeeklyPlan = (
 ): Promise<WeeklyPlanCommandOutcome> =>
   invokeCommand({ action: "plan", commandId, profile });
 
+export const recoverInitialWeeklyPlan = (
+  commandId: string,
+): Promise<WeeklyPlanCommandOutcome> =>
+  invokeCommand({
+    action: "plan",
+    commandId,
+    profile: {},
+    resumeExisting: true,
+  });
+
 export const generateMealPlan = async (
   profile: UserProfile,
   feedback?: MealFeedback[],
@@ -118,6 +128,7 @@ export const generateNextWeeklyPlan = (
     feedback: command.feedback,
     currentPlan: command.currentPlan,
     reviewType: command.reviewType,
+    resumeExisting: command.resumeExisting,
   });
 
 export const replaceWeeklyPlanFromProfile = (
@@ -154,4 +165,5 @@ export const rerollMeal = (
     displayedRevision: command.displayedRevision,
     day: command.day,
     mealType: command.mealType,
+    resumeExisting: command.resumeExisting,
   });

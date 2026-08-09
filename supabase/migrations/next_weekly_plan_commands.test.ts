@@ -11,6 +11,7 @@ const migrations = [
   "./20260727140000_create_ingredient_progress_commands.sql",
   "./20260727150000_create_meal_reroll_commands.sql",
   "./20260727160000_create_next_weekly_plan_commands.sql",
+  "./20260809084346_reconcile_unknown_weekly_plan_commands.sql",
 ].map((path) => fileURLToPath(new URL(path, import.meta.url)));
 
 const userId = "00000000-0000-4000-8000-000000000001";
@@ -298,7 +299,7 @@ describe("Next Weekly Plan database command", () => {
     );
     expect(recovered).toMatchObject({
       status: "failed",
-      error: { code: "stale_generation_recovered", retryable: true },
+      error: { code: "provider_outcome_unrecoverable", retryable: false },
     });
     const recorded = await database.query<{
       failure_evidence: unknown;
@@ -312,7 +313,7 @@ describe("Next Weekly Plan database command", () => {
     expect(recorded.rows[0]).toEqual({
       failure_evidence: {
         stage: "recovery",
-        reason: "no_committed_result",
+        reason: "missing_provider_checkpoint_without_committed_result",
       },
       next_generation_id: null,
     });

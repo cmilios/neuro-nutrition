@@ -35,6 +35,7 @@ const {
   getProfileData,
   saveProfileData,
   getCurrent,
+  getPendingInitialGeneration,
   getPendingMealRerolls,
   createCurrent,
   saveCurrent,
@@ -53,6 +54,7 @@ const {
   getProfileData: vi.fn(),
   saveProfileData: vi.fn(),
   getCurrent: vi.fn(),
+  getPendingInitialGeneration: vi.fn(),
   getPendingMealRerolls: vi.fn(),
   createCurrent: vi.fn(),
   saveCurrent: vi.fn(),
@@ -101,6 +103,7 @@ vi.mock("./services/weeklyPlanGateway", () => ({
   })),
   weeklyPlanGateway: {
     getCurrent,
+    getPendingInitialGeneration,
     getPendingMealRerolls,
     createCurrent,
     saveCurrent,
@@ -147,6 +150,7 @@ describe("application generation flow", () => {
       } : null;
     });
     getPendingMealRerolls.mockReset().mockResolvedValue([]);
+    getPendingInitialGeneration.mockReset().mockResolvedValue(null);
     createCurrent.mockReset().mockImplementation(async ({ commandId, userId, document }) => ({
       commandId,
       status: "succeeded",
@@ -316,6 +320,47 @@ describe("application generation flow", () => {
     expect(edgeFunctionInvoke.mock.calls[1][1].body.commandId).toBe(firstCommandId);
   });
 
+  it("rediscovers and reconciles a pending initial command after reload", async () => {
+    const lockedCommandId = "10000000-0000-4000-8000-000000000072";
+    getPendingInitialGeneration
+      .mockResolvedValueOnce(lockedCommandId)
+      .mockResolvedValue(null);
+    edgeFunctionInvoke.mockResolvedValue({
+      data: {
+        commandId: lockedCommandId,
+        status: "failed",
+        result: null,
+        error: {
+          code: "provider_outcome_unrecoverable",
+          message: "No Current Weekly Plan was committed.",
+          retryable: false,
+        },
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(edgeFunctionInvoke).toHaveBeenCalledWith(
+        "generate-meal-plan",
+        expect.objectContaining({
+          body: {
+            action: "plan",
+            commandId: lockedCommandId,
+            profile: {},
+            resumeExisting: true,
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(getPendingInitialGeneration).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("heading", { name: "Let's build your plan." }))
+        .toBeInTheDocument();
+    });
+  });
+
   it("uses a new command ID after a confirmed terminal generation failure", async () => {
     edgeFunctionInvoke
       .mockImplementationOnce(async (_name, { body }) => ({
@@ -466,6 +511,63 @@ describe("application generation flow", () => {
       .toBeDisabled();
     expect(screen.getByRole("button", { name: "Next Week" })).toBeDisabled();
     await waitFor(() => expect(getCurrent).toHaveBeenCalledTimes(2));
+  });
+
+  it("reconciles a remotely reserved Meal Slot with its persisted command identity", async () => {
+    const lockedCommandId = "10000000-0000-4000-8000-000000000071";
+    const profile = {
+      age: 30,
+      gender: "Male",
+      heightCm: 175,
+      weightKg: 75,
+      activityLevel: "Moderately Active",
+      goal: "Lose Weight",
+      dietType: "Mediterranean",
+    };
+    getProfileData.mockResolvedValue({ profile, mealPlan: weeklyPlanFixture, milestones: [] });
+    getPendingMealRerolls
+      .mockResolvedValueOnce([{
+        commandId: lockedCommandId,
+        planId: "00000000-0000-4000-8000-000000000010",
+        day: "Monday",
+        mealType: "breakfast",
+        reservedAt: "2026-07-27T10:00:00.000Z",
+      }])
+      .mockResolvedValue([]);
+    edgeFunctionInvoke.mockResolvedValue({
+      data: {
+        commandId: lockedCommandId,
+        status: "failed",
+        result: null,
+        error: {
+          code: "provider_outcome_unrecoverable",
+          message: "The Meal Slot was not changed.",
+          retryable: false,
+        },
+      },
+      error: null,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(edgeFunctionInvoke).toHaveBeenCalledWith(
+        "generate-meal-plan",
+        expect.objectContaining({
+          body: expect.objectContaining({
+            action: "meal",
+            commandId: lockedCommandId,
+            displayedPlanId: "00000000-0000-4000-8000-000000000010",
+            displayedRevision: 0,
+            day: "Monday",
+            mealType: "breakfast",
+            resumeExisting: true,
+          }),
+        }),
+      );
+    });
+    await waitFor(() => expect(getPendingMealRerolls).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Test Berry Breakfast")).toBeInTheDocument();
   });
 
   it("reconciles response loss after commit by replaying the same command identity", async () => {

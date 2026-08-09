@@ -21,6 +21,7 @@ export interface WeeklyPlanGateway {
   setIngredientChecked(command: IngredientProgressCommand): Promise<WeeklyPlanCommandOutcome>;
   startOver(command: StartOverCommand): Promise<WeeklyPlanCommandOutcome>;
   getPendingMealRerolls(userId: string): Promise<MealRerollReservation[]>;
+  getPendingInitialGeneration(): Promise<string | null>;
 }
 
 interface WeeklyPlanDatabaseRow {
@@ -132,6 +133,26 @@ export const createMealRerollReservationReader = (
   },
 });
 
+export const createPendingInitialGenerationReader = (
+  client: Pick<SupabaseClient, "rpc">,
+) => ({
+  async getPendingInitialGeneration(): Promise<string | null> {
+    const { data, error } = await client.rpc(
+      "get_pending_initial_weekly_plan_generation",
+    );
+    if (error) throw error;
+    if (data === null) return null;
+    const commandId = (data as { commandId?: unknown }).commandId;
+    if (
+      typeof commandId !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(commandId)
+    ) {
+      throw new Error("Pending initial generation returned an invalid command ID");
+    }
+    return commandId;
+  },
+});
+
 export type WeeklyPlanRealtimeStatus = "connected" | "disconnected";
 
 export const createWeeklyPlanInvalidationSubscription = (
@@ -190,6 +211,7 @@ export const createStartOverGateway = (
 const authoritativeWeeklyPlanReader = createAuthoritativeWeeklyPlanReader(supabase);
 const ingredientProgressGateway = createIngredientProgressGateway(supabase);
 const mealRerollReservationReader = createMealRerollReservationReader(supabase);
+const pendingInitialGenerationReader = createPendingInitialGenerationReader(supabase);
 const startOverGateway = createStartOverGateway(supabase);
 
 export const weeklyPlanGateway: WeeklyPlanGateway = {
@@ -197,4 +219,6 @@ export const weeklyPlanGateway: WeeklyPlanGateway = {
   setIngredientChecked: ingredientProgressGateway.setIngredientChecked,
   startOver: startOverGateway.startOver,
   getPendingMealRerolls: mealRerollReservationReader.getPendingMealRerolls,
+  getPendingInitialGeneration:
+    pendingInitialGenerationReader.getPendingInitialGeneration,
 };

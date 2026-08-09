@@ -50,7 +50,7 @@ const usageRecord = createOpenAIUsageRecord({
   outcome: "success",
 });
 
-const request = () => new Request("http://localhost/generate", {
+const request = (overrides: Record<string, unknown> = {}) => new Request("http://localhost/generate", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -61,6 +61,7 @@ const request = () => new Request("http://localhost/generate", {
     displayedRevision: 3,
     day: "Monday",
     mealType: "breakfast",
+    ...overrides,
   }),
 });
 
@@ -259,5 +260,49 @@ describe("durable authoritative Meal Reroll HTTP command", () => {
       }),
     }));
     expect(mealReroll.fail).not.toHaveBeenCalled();
+  });
+
+  it("recovers a persisted Meal Reroll identity without another provider call", async () => {
+    const mealReroll = {
+      ...store(),
+      recover: vi.fn().mockResolvedValue({
+        commandId,
+        status: "failed" as const,
+        result: null,
+        error: {
+          code: "provider_outcome_unrecoverable",
+          message: "The Meal Slot was not changed.",
+          retryable: false,
+        },
+        shouldGenerate: false,
+        checkpoint: null,
+        inputFingerprint: "a".repeat(64),
+      }),
+    };
+    const generate = vi.fn();
+    const handler = createGenerateMealPlanHandler({
+      authenticate: vi.fn().mockResolvedValue({ id: "user-1" }),
+      generate,
+      persist: vi.fn(),
+      mealReroll,
+    });
+
+    const response = await handler(request({
+      profile: {},
+      resumeExisting: true,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      commandId,
+      status: "failed",
+      error: { code: "provider_outcome_unrecoverable", retryable: false },
+    });
+    expect(mealReroll.recover).toHaveBeenCalledWith({
+      commandId,
+      userId: "user-1",
+    });
+    expect(mealReroll.begin).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
   });
 });

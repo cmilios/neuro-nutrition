@@ -66,6 +66,7 @@ vi.mock("./services/storageService", () => ({
 vi.mock("./services/weeklyPlanGateway", () => ({
   createWeeklyPlanInvalidationSubscription: createInvalidationSubscription,
   weeklyPlanGateway: {
+    getPendingInitialGeneration: vi.fn().mockResolvedValue(null),
     getCurrent,
     getPendingMealRerolls,
   },
