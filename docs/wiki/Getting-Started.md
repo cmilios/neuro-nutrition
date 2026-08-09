@@ -15,8 +15,10 @@ Because this is an early-stage beta, behavior and availability may change.
 - Choose **Create Account** to register with email and password. If the app asks
   you to confirm your email, use the confirmation message before signing in.
 - Choose **Log In** if you already have an account.
-- Google or Apple buttons appear only when that sign-in method is currently
-  offered. If a method is absent or unavailable, choose another offered method.
+- Provider buttons appear only while that method is available to ordinary
+  users. If a method is absent or unavailable, choose another offered method.
+  [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)
+  owns the current availability details.
 
 Keep passwords, confirmation links, and recovery links private.
 
@@ -46,6 +48,10 @@ the app provides a recoverable error.
 The Weekly Plan contains breakfast, lunch, dinner, and a snack for each day.
 Open a meal card to see its ingredients and preparation details.
 
+Continue with [Using Your Weekly Plan](https://github.com/cmilios/neuro-nutrition/wiki/Using-Your-Weekly-Plan)
+for ingredient progress, Meal Reroll, milestones, and the path to a Next Weekly
+Plan.
+
 ## 5. Check every meal before using it
 
 AI-Assisted Meal Planning provides general guidance, not medical advice,
@@ -68,8 +74,14 @@ recovery screen and set a new password. This does not end the current session.
 
 The signed-out screen does not currently offer a password-recovery request. If
 you are signed out, use another connected sign-in method that is currently
-available or [contact support](https://github.com/cmilios/neuro-nutrition/issues/new)
-for account-access help. Never post a password, recovery link, email address, or
-other private account information in a public issue.
+available, then follow the safe recovery steps in
+[Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting).
+The public issue tracker is not an account-support inbox. Never post a password,
+recovery link, email address, or other private account information in an issue.
+
+See [Account and Settings](https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings)
+for connected methods, password changes, appearance, and logout behavior, or
+follow [Troubleshooting](https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting)
+for safe recovery steps.
 
 [Return to the user-guide Home](https://github.com/cmilios/neuro-nutrition/wiki)

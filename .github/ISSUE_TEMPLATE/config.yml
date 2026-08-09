@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/cmilios/neuro-nutrition/wiki/Troubleshooting
+    about: Try task-oriented recovery steps before opening a public issue.
+  - name: Account and Settings guide
+    url: https://github.com/cmilios/neuro-nutrition/wiki/Account-and-Settings
+    about: Review current sign-in, recovery, connected-method, appearance, and logout behavior.

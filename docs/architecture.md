@@ -220,6 +220,328 @@ do not replace, RLS. Tests covering the behavior live in
 [`App.sessionRestore.test.tsx`](../App.sessionRestore.test.tsx), and
 [`services/weeklyPlanGateway.test.ts`](../services/weeklyPlanGateway.test.ts).
 
+## Authoritative Weekly Plan lifecycle
+
+The active row in `weekly_plans` is the Current Weekly Plan. Browser state,
+request payloads, Realtime events, and the cache may describe or invalidate
+that row, but none may replace it. Provider-backed changes use durable command
+rows so that a browser retry can repeat one intent without authorizing a second
+billable operation. Database-only changes use the same command identity and
+replay principle without pretending that provider work occurred.
+
+| Flow | Authoritative precondition | Concurrency boundary | Successful result |
+| --- | --- | --- | --- |
+| Initial generation | An authoritative read confirmed that no active plan exists. | One pending initial-generation command per user; no placeholder plan is created. | Insert one active revision-0 plan with the command as its generation identity. |
+| Meal Reroll | The server resolves the authenticated user's active plan and selected Meal Slot. | A durable reservation protects that Meal Slot; generation-wide changes wait for reservations to clear. | Replace only the reserved meal and increment the active plan revision once. |
+| Next Weekly Plan | The submitted source identity resolves to the active plan and revision. | The active row carries the generation command and lock time; conflicting mutations are rejected. | Deactivate the source and insert one active revision-0 successor linked by `predecessor_plan_id`. |
+| Health Profile Plan Replacement | The submitted source is active and the saved plan-relevant Health Profile is available. | A separate replacement command and source-row lock reject conflicting mutations. | Keep the source active during generation, then atomically replace it with a revision-0 successor. |
+| Ingredient progress | The target occurrence belongs to an active authoritative plan. | One idempotent database command sets an explicit checked state; generation locks reject it. | Update one stable ingredient occurrence and increment the plan revision once when state changes. |
+| Start Over | The displayed plan still resolves to the user's active plan and no generation or Meal Reroll is pending. | The database locks the active row and records the command in the same transaction. | Deactivate the Current Weekly Plan; preserve its history and all unrelated user data. |
+
+### Durable provider command protocol
+
+Initial generation, Meal Reroll, Next Weekly Plan, and Health Profile Plan
+Replacement share this server-side shape. Their command ID is a UUID created at
+the user-intent boundary. The database binds it to the authenticated user,
+operation, and a privacy-safe input fingerprint. Reusing an ID with different
+input fails; replaying the same identity returns its recorded state.
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant Edge as generate-meal-plan
+  participant Commands as Command RPCs and Postgres
+  participant OpenAI as OpenAI Responses API
+
+  User->>App: Request one Weekly Plan change
+  App->>App: Create or retain command UUID
+  App->>Edge: Intent plus command ID and source identity
+  Edge->>Commands: Begin and reserve or lock authoritative state
+  alt Recorded command or conflicting work
+    Commands-->>Edge: succeeded, failed, or in_progress; shouldGenerate=false
+  else This command owns provider work
+    Commands-->>Edge: in_progress; shouldGenerate=true
+    Edge->>OpenAI: One attributed generation attempt
+    OpenAI-->>Edge: Result, known failure, or uncertain transport outcome
+    Edge->>Commands: Immutable success, failure, or unknown checkpoint
+    Edge->>Commands: Persist AI Usage Record
+    alt Success checkpoint
+      Edge->>Commands: Complete atomically
+      Commands-->>Edge: succeeded plus authoritative row
+    else Known terminal failure
+      Edge->>Commands: Fail and release reservation or lock
+      Commands-->>Edge: failed plus safe evidence
+    else Unknown provider outcome
+      Edge-->>App: 503; command remains in_progress
+      App->>Edge: Retry the same command identity
+      Edge->>Commands: Replay checkpoint; never call provider again
+    end
+  end
+  Edge-->>App: Recorded command outcome
+  App->>Commands: Refetch authoritative plan when outcome is unclear
+```
+
+A provider result is checkpointed before command completion. This ordering lets
+a retry finish a known success without a second provider call. AI usage is
+persisted before the checkpoint is finalized; if attribution cannot be made
+durable, the command stays pending rather than publishing unaccounted output.
+Only the database completion transaction may publish a new plan or revision.
+
+An `unknown` checkpoint means the provider request may have crossed the
+third-party boundary but no safe result is available. It must never authorize
+another provider attempt under either the same or a new command while the old
+reservation or lock remains. The browser keeps the command identity when it can,
+marks the displayed plan read-only, and refetches authoritative state.
+
+### Initial Current Weekly Plan generation
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant Plans as weekly_plans
+  participant Edge as generate-meal-plan
+  participant Commands as initial command RPCs
+  participant OpenAI as OpenAI
+
+  App->>Plans: Read active plan for authenticated user
+  Plans-->>App: Confirmed empty
+  User->>App: Submit Health Profile
+  App->>Edge: profile plus retained command UUID
+  Edge->>Commands: Begin only if user still has no active plan
+  Commands-->>Edge: Pending command; no placeholder plan
+  Edge->>OpenAI: Generate from submitted Health Profile
+  OpenAI-->>Edge: Result or failure
+  Edge->>Commands: Checkpoint provider outcome and usage
+  alt Valid result
+    Edge->>Commands: Complete
+    Commands->>Plans: Insert one active revision-0 plan
+    Commands-->>App: succeeded plus authoritative row
+  else Known failure
+    Edge->>Commands: Fail
+    Commands-->>App: failed; authoritative state remains empty
+  else Unknown transport outcome
+    Edge-->>App: 503; command remains pending
+    App->>Edge: User retry reuses command UUID while page state survives
+    Edge->>Commands: Replay without another provider call
+    Commands-->>App: No automated terminal reconciliation; operator repair pending issue 80
+  end
+```
+
+The UI offers this flow only after `getCurrent` returns authoritative empty. A
+cache miss, rejected row, timeout, or failed request leaves generation disabled.
+The command RPC repeats the empty-state check, so a stale browser cannot create
+a second active plan. The Health Profile draft stays in browser state for retry;
+the ordinary profile save currently follows successful plan publication.
+
+### Meal Reroll
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant Edge as generate-meal-plan
+  participant Commands as Meal Reroll RPCs
+  participant Plans as weekly_plans and reservations
+  participant OpenAI as OpenAI
+
+  User->>App: Reroll one Meal Slot
+  App->>Edge: command UUID, displayed plan and revision, day, meal type
+  Edge->>Commands: Begin
+  Commands->>Plans: Resolve active server meal and reserve only its slot
+  Commands-->>Edge: Authoritative source meal
+  Edge->>OpenAI: Generate same type, excluding Same Meal
+  OpenAI-->>Edge: Candidate and usage
+  Edge->>Edge: Validate shape, type, and difference; at most two attempts
+  Edge->>Commands: Checkpoint result
+  alt Valid replacement
+    Edge->>Commands: Complete
+    Commands->>Plans: Replace one meal, assign server ingredient IDs, increment revision, remove reservation
+  else Known failure
+    Edge->>Commands: Fail and remove reservation
+  else Unknown outcome
+    Edge-->>App: 503; reservation remains visible through read and Realtime paths
+    App->>Edge: Immediate replay or user retry with same command UUID
+    Edge->>Commands: Replay without another provider call
+    Commands-->>App: No automated terminal reconciliation; operator repair pending issue 80
+  end
+  Commands-->>App: Outcome plus full authoritative row when succeeded
+```
+
+The browser deliberately does not supply the meal document to mutate. Pending
+reservations are presentation and exclusion signals, not authority; their
+server row is what prevents duplicate work on that Meal Slot. Completion
+returns the entire validated authoritative row so the client does not splice a
+provider response into local state.
+
+### Next Weekly Plan
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant Edge as generate-meal-plan
+  participant Commands as Next Weekly Plan RPCs
+  participant Plans as weekly_plans
+  participant OpenAI as OpenAI
+
+  User->>App: Submit Meal Review and request next week
+  App->>Edge: review, command UUID, displayed source identity
+  Edge->>Commands: Begin
+  Commands->>Plans: Lock active source and return its authoritative document
+  Edge->>OpenAI: Generate from source, review, and variety rules
+  OpenAI-->>Edge: Candidate and usage
+  Edge->>Edge: Validate retention, movement, and variety; at most two attempts
+  Edge->>Commands: Checkpoint validated result or failure
+  alt Valid successor
+    Edge->>Commands: Complete atomically
+    Commands->>Plans: Deactivate source and insert linked revision-0 successor
+  else Known failure
+    Edge->>Commands: Fail and clear source lock
+  else Unknown outcome
+    Edge-->>App: 503; source remains active, visible, and read-only
+    App->>Edge: Retry same command identity
+    Edge->>Commands: Replay checkpoint without provider work
+    Commands-->>App: No wired stale recovery; operator repair pending issue 80
+  end
+  Commands-->>App: Outcome plus successor when succeeded
+```
+
+The Edge Function ignores browser plan content as write authority and generates
+from the source document returned by the lock transaction. Next Weekly Plan is
+the only flow that applies Meal Review retention and variety rules. Its source
+remains the Current Weekly Plan until completion; failure never publishes a
+partial successor.
+
+### Health Profile Plan Replacement
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant Profile as user_data
+  participant Edge as generate-meal-plan
+  participant Commands as replacement RPCs
+  participant Plans as weekly_plans
+  participant OpenAI as OpenAI
+
+  User->>App: Save plan-relevant Health Profile and replace plan
+  App->>Profile: Save updated Health Profile
+  App->>Edge: command UUID and displayed source identity
+  Edge->>Profile: Load saved Health Profile server-side
+  Edge->>Commands: Begin and lock active source
+  Edge->>OpenAI: Generate normally; no Meal Review retention rules
+  OpenAI-->>Edge: Candidate and usage
+  Edge->>Commands: Checkpoint outcome
+  alt Valid replacement
+    Edge->>Commands: Complete atomically
+    Commands->>Plans: Deactivate source and insert linked revision-0 successor
+  else Known failure
+    Edge->>Commands: Fail and clear lock
+    Plans-->>App: Previous plan remains current
+  else Unknown or interrupted outcome
+    Edge-->>App: 503 or in_progress
+    App->>Edge: Replay locked command every 60 seconds
+    Edge->>Commands: Recover stale command
+    alt Successor already committed
+      Commands-->>App: Replay succeeded result
+    else No committed result after stale threshold
+      Commands-->>App: Retryable failure; clear lock
+      App->>Edge: Retry once with a new command UUID
+    end
+  end
+```
+
+Saving the Health Profile and replacing the plan are separate effects: a failed
+replacement does not roll back the saved profile, and the previous plan remains
+current. On a normal first attempt, the Edge Function reloads the saved profile
+instead of trusting browser profile JSON. A resumed locked command uses its
+persisted fingerprint so later profile edits cannot silently change its intent.
+
+### Ingredient progress and Start Over
+
+Neither operation calls OpenAI. They are authoritative database mutations and
+must not be forced into the provider command sequence merely for symmetry.
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant App as React App
+  participant RPC as Authenticated Postgres RPC
+  participant Plans as weekly_plans
+
+  alt Ingredient progress
+    User->>App: Set one ingredient occurrence checked or unchecked
+    App->>RPC: Command UUID, plan identity, Meal Slot, ingredient ID, desired state
+    RPC->>Plans: Lock active plan, verify owner and stable occurrence
+    RPC->>Plans: Set explicit state and increment revision only when needed
+    RPC-->>App: Replayable outcome plus authoritative row
+  else Start Over
+    User->>App: Confirm Start Over
+    App->>RPC: Retained command UUID and displayed plan identity
+    RPC->>Plans: Lock active plan and reject pending generation or Meal Reroll
+    RPC->>Plans: Deactivate plan and record command atomically
+    RPC-->>App: succeeded, failed, or replayed outcome
+    App->>Plans: Refetch after an unknown transport outcome
+  end
+```
+
+Ingredient progress uses server-assigned occurrence identities so repeated
+ingredient labels remain independent. Setting an already-equal state is an
+idempotent success. Start Over deactivates the plan rather than deleting it and
+preserves the Health Profile, milestones, AI Usage Records, and inactive plan
+history. Once an authoritative read confirms empty, the ordinary initial
+generation gate applies again.
+
+### Recovery limits and follow-up work
+
+The current implementation does not yet provide one complete reconciliation
+path for every provider-backed command. Health Profile Plan Replacement wires a
+stale-command recovery RPC into the Edge Function and the browser replay loop.
+The database also defines stale recovery for Next Weekly Plan, but the current
+Edge Function store does not expose or call it. Initial generation and Meal
+Reroll retain an immutable `unknown` checkpoint and prevent duplicate provider
+work, while their browser command IDs survive only the current page lifetime.
+
+This is safe with respect to duplicate generation—the reservation or lock stays
+closed—but it can leave work pending indefinitely and require operator repair.
+Completing automated reconciliation for initial generation, Meal Reroll, and
+Next Weekly Plan is tracked as [issue #80](https://github.com/cmilios/neuro-nutrition/issues/80).
+Documentation must not imply that a Realtime refetch, cache read, or retry with
+a fresh command ID resolves an unknown provider outcome.
+
+### Transitional rollout and legacy persistence
+
+The preferred architecture is the authority-first gateway and the authoritative
+database lifecycle above. [`services/weeklyPlanBridge.ts`](../services/weeklyPlanBridge.ts)
+and the rollout migrations exist only to make the historical cutover observable
+and fail closed:
+
+- `legacy` reports that older persistence still owns the environment;
+- `maintenance` disables Weekly Plan changes during migration;
+- `authoritative` enables the command and `weekly_plans` paths.
+
+The Edge Function checks this state before provider work. The main application
+imports the authoritative gateway, not the bridge as an alternate write path.
+Legacy local storage and migration commands are compatibility evidence, not a
+supported fallback and not a second source of truth. New lifecycle work should
+extend authoritative tables, RPCs, and command tests rather than add another
+client persistence path.
+
+### Lifecycle evidence map
+
+| Claim area | Current evidence |
+| --- | --- |
+| Authority and cache gate | [`App.authority.test.tsx`](../App.authority.test.tsx), [`services/weeklyPlanGateway.ts`](../services/weeklyPlanGateway.ts), [`services/weeklyPlanCache.ts`](../services/weeklyPlanCache.ts) |
+| Initial generation | [`initial generation handler tests`](../supabase/functions/generate-meal-plan/initialGeneration.test.ts), [`initial command migration`](../supabase/migrations/20260727130000_create_initial_generation_commands.sql), [`migration tests`](../supabase/migrations/initial_generation_commands.test.ts) |
+| Meal Reroll | [`Meal Reroll handler tests`](../supabase/functions/generate-meal-plan/mealReroll.test.ts), [`Meal Reroll migration`](../supabase/migrations/20260727150000_create_meal_reroll_commands.sql), [`migration tests`](../supabase/migrations/meal_reroll_commands.test.ts) |
+| Next Weekly Plan | [`App.nextGeneration.test.tsx`](../App.nextGeneration.test.tsx), [`handler tests`](../supabase/functions/generate-meal-plan/nextGenerationCommand.test.ts), [`Next Weekly Plan migration`](../supabase/migrations/20260727160000_create_next_weekly_plan_commands.sql), [`migration tests`](../supabase/migrations/next_weekly_plan_commands.test.ts) |
+| Health Profile Plan Replacement | [`replacement handler tests`](../supabase/functions/generate-meal-plan/healthProfileReplacement.test.ts), [`replacement migration`](../supabase/migrations/20260730062107_create_health_profile_plan_replacement_commands.sql), [`migration tests`](../supabase/migrations/health_profile_plan_replacement_commands.test.ts) |
+| Ingredient progress and Start Over | [`ingredient migration`](../supabase/migrations/20260727140000_create_ingredient_progress_commands.sql), [`ingredient command tests`](../supabase/migrations/ingredient_progress_commands.test.ts), [`Start Over migration`](../supabase/migrations/20260727170000_create_start_over_commands.sql), [`App.startOver.test.tsx`](../App.startOver.test.tsx), [`Start Over migration tests`](../supabase/migrations/start_over_weekly_plan_commands.test.ts) |
+| Provider checkpoint and server orchestration | [`handler.ts`](../supabase/functions/generate-meal-plan/handler.ts), [`persistence.ts`](../supabase/functions/generate-meal-plan/persistence.ts); [ADR-0001](adr/0001-record-per-user-ai-usage.md) owns AI Usage Record attribution only |
+| Transitional rollout | [`weeklyPlanBridge.ts`](../services/weeklyPlanBridge.ts), [`legacy cutover tests`](../supabase/migrations/legacy_weekly_plan_cutover.test.ts), [`weekly plan observation tests`](../supabase/migrations/weekly_plan_observation.test.ts) |
+
 ## Edge Functions and privileged operations
 
 [`supabase/config.toml`](../supabase/config.toml) deliberately sets
@@ -312,8 +634,3 @@ session restoration or Display Name gating, changes grants or RLS, changes
 cache authority, adds a privileged operation, or changes secret or telemetry
 handling. Add or supersede an ADR when the decision is durable, not merely an
 implementation detail.
-
-The authoritative Weekly Plan command lifecycle, recovery behavior, and legacy
-rollout bridge are intentionally left for the next architecture slice. The
-preferred runtime already imports the authority-first gateway; the transitional
-bridge is not a competing source of truth in the main application bundle.
