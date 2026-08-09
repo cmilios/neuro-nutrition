@@ -12,8 +12,8 @@ Select **Next Week** to open **Review Your Week**. Each Meal Slot has **Cooked**
 and **Liked** controls.
 
 - A **Cooked Meal** has **Cooked** selected.
-- A **Liked Meal** is a Cooked Meal with **Liked** also selected. Selecting
-  **Liked** also selects **Cooked**.
+- A **Liked Meal** is a Cooked Meal with **Liked** also selected. The **Liked**
+  control becomes available after you select **Cooked**.
 - A **Disliked Meal** is a Cooked Meal with **Liked** left unselected.
 - An **Uncooked Meal** is one you did not prepare.
 
@@ -56,10 +56,9 @@ read-only while the Next Weekly Plan is being generated. A successful result
 becomes the new Current Weekly Plan.
 
 If generation definitely fails, the existing Current Weekly Plan remains
-unchanged and the app may offer **Retry generation**. Use that offered control
+unchanged and the app may offer **Try Again**. Use that offered control
 rather than opening another tab or submitting a second Meal Review. If the
 outcome is still unknown or the app says generation is in progress, wait for
 the app to reconcile it before retrying.
 
 [Learn when to use Start Over instead](https://github.com/cmilios/neuro-nutrition/wiki/Start-Over)
-

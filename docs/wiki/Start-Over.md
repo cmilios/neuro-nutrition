@@ -52,4 +52,3 @@ confirmed. Use the app's offered **Retry** control once; it safely continues or
 restarts the recorded action. If the plan is checking, read-only, or the outcome
 is unknown, do not submit Start Over from another tab, browser, or device. Wait
 for reconciliation before taking another action.
-

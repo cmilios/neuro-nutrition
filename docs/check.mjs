@@ -352,6 +352,9 @@ const validateWikiPublication = async () => {
     [/Inspect rendered Wiki/i, "Workflow must inspect the rendered Wiki after publication"],
     [/Account-and-Settings/i, "Workflow must inspect the rendered Account and Settings page"],
     [/Troubleshooting/i, "Workflow must inspect the rendered Troubleshooting page"],
+    [/Using-Your-Weekly-Plan/, "Workflow must inspect Using Your Weekly Plan after publication"],
+    [/Reviewing-Your-Week/, "Workflow must inspect Reviewing Your Week after publication"],
+    [/Start-Over/, "Workflow must inspect Start Over after publication"],
   ];
 
   for (const [pattern, message] of contracts) {
