@@ -66,6 +66,15 @@ The three configured probe URLs are:
 - `...?probe=release-identity`
 - `...?probe=function-failures`
 
+Each probe is attempted up to four times with a ten-second per-request timeout
+and a linear backoff, so a single transient upstream error (a 502 from the
+Supabase edge, a dropped connection) does not report the monitor as unavailable.
+Retries cover network failures and the retryable statuses 408, 429, 500, 502,
+503 and 504. Any other non-2xx response — notably 401 or 403 from a rotated or
+mistyped credential — fails immediately without retrying, so a genuine
+misconfiguration still fails closed and fast. Exhausting all attempts remains a
+`monitoring_unavailable` critical finding that fails the run.
+
 To rotate the monitoring credential, generate a new random 256-bit value, write
 it to all three `OBSERVATION_*_TOKEN` GitHub secrets, replace its digest in both
 Edge Functions, and deploy both functions together. A deliberate
