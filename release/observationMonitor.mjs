@@ -3,25 +3,49 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { evaluateObservationSnapshot } from "./observationGate.mjs";
 
-async function readProbe(url, token) {
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const PROBE_TIMEOUT_MS = 10_000;
+// The observation probes 502 often enough that a single retry still leaves the
+// scheduled run red most days; four attempts on a second-scale backoff also
+// gives a cold edge instance time to boot. Worst case adds ~6s to a ~20s run.
+const DEFAULT_ATTEMPTS = 4;
+const DEFAULT_RETRY_DELAY_MS = 1000;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function readProbe(url, token, retry = {}) {
   if (!url) return { error: "probe_not_configured" };
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!response.ok) return { error: `http_${response.status}` };
-    return await response.json();
-  } catch {
-    return { error: "probe_unavailable" };
+  const attempts = retry.attempts ?? DEFAULT_ATTEMPTS;
+  const retryDelayMs = retry.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+  let failure = { error: "probe_unavailable", attempts: 0 };
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      });
+      if (response.ok) return await response.json();
+      failure = { error: `http_${response.status}`, attempts: attempt };
+      // A 4xx other than 408/429 means misconfiguration, not a blip; stop early.
+      if (!RETRYABLE_STATUSES.has(response.status)) return failure;
+    } catch {
+      failure = { error: "probe_unavailable", attempts: attempt };
+    }
+    if (attempt < attempts) await wait(retryDelayMs * attempt);
   }
+  return failure;
 }
 
 export async function runObservationMonitor(options = {}) {
+  const retry = {
+    attempts: options.attempts,
+    retryDelayMs: options.retryDelayMs,
+  };
   const [database, releaseIdentity, functionFailures] = await Promise.all([
-    readProbe(options.databaseUrl, options.databaseToken),
-    readProbe(options.releaseIdentityUrl, options.releaseIdentityToken),
-    readProbe(options.functionFailuresUrl, options.functionFailuresToken),
+    readProbe(options.databaseUrl, options.databaseToken, retry),
+    readProbe(options.releaseIdentityUrl, options.releaseIdentityToken, retry),
+    readProbe(options.functionFailuresUrl, options.functionFailuresToken, retry),
   ]);
   const snapshot = {
     ...(database && typeof database === "object" ? database : {}),

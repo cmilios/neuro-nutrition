@@ -47,11 +47,16 @@ describe("observation monitor", () => {
 
   it("alerts without a plan mutation when monitoring is unavailable", async () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-    const fetchMock = vi.fn()
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ matches: true })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ critical: 0 })))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith("/database")) return Promise.reject(new Error("offline"));
+      if (url.endsWith("/release")) {
+        return Promise.resolve(new Response(JSON.stringify({ matches: true })));
+      }
+      if (url.endsWith("/functions")) {
+        return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+      }
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await runObservationMonitor({
@@ -59,6 +64,7 @@ describe("observation monitor", () => {
       releaseIdentityUrl: "https://example.test/release",
       functionFailuresUrl: "https://example.test/functions",
       alertUrl: "https://example.test/alert",
+      retryDelayMs: 0,
     });
 
     expect(result.evaluation.status).toBe("failed");
@@ -66,8 +72,65 @@ describe("observation monitor", () => {
       "https://example.test/alert",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(fetchMock.mock.calls.slice(0, 3).every(([, options]) =>
-      options.method === "GET"
-    )).toBe(true);
+    expect(
+      fetchMock.mock.calls
+        .filter(([url]) => !url.endsWith("/alert"))
+        .every(([, options]) => options.method === "GET"),
+    ).toBe(true);
+  });
+
+  it("retries a transient probe failure and passes once it recovers", async () => {
+    let databaseAttempts = 0;
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith("/database")) {
+        databaseAttempts += 1;
+        if (databaseAttempts < 3) {
+          return Promise.resolve(new Response(null, { status: 502 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(databaseSnapshot)));
+      }
+      if (url.endsWith("/release")) {
+        return Promise.resolve(new Response(JSON.stringify({ matches: true })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runObservationMonitor({
+      databaseUrl: "https://example.test/database",
+      releaseIdentityUrl: "https://example.test/release",
+      functionFailuresUrl: "https://example.test/functions",
+      retryDelayMs: 0,
+    });
+
+    expect(result.evaluation.status).toBe("passed");
+    expect(databaseAttempts).toBe(3);
+  });
+
+  it("stops retrying a probe that is rejecting our credentials", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let databaseAttempts = 0;
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith("/database")) {
+        databaseAttempts += 1;
+        return Promise.resolve(new Response(null, { status: 401 }));
+      }
+      if (url.endsWith("/release")) {
+        return Promise.resolve(new Response(JSON.stringify({ matches: true })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runObservationMonitor({
+      databaseUrl: "https://example.test/database",
+      releaseIdentityUrl: "https://example.test/release",
+      functionFailuresUrl: "https://example.test/functions",
+      retryDelayMs: 0,
+    });
+
+    expect(result.evaluation.status).toBe("failed");
+    expect(result.snapshot.error).toBe("http_401");
+    expect(databaseAttempts).toBe(1);
   });
 });
