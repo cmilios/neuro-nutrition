@@ -30,6 +30,17 @@ function bearerToken(request: Request): string | null {
 
 type JsonObject = Record<string, unknown>;
 
+/**
+ * Carries the status an upstream answered a probe loader with, so the handler
+ * can tell a refused credential from an unreachable dependency. The status is
+ * the only detail that crosses the boundary; the message stays on this side.
+ */
+export class ProbeUpstreamError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 export function createObservationProbeHandler(options: {
   expectedTokenHash: string;
   loadDatabaseSnapshot: () => Promise<JsonObject>;
@@ -74,7 +85,19 @@ export function createObservationProbeHandler(options: {
         );
       }
       return Response.json(result, { headers: jsonHeaders });
-    } catch {
+    } catch (error) {
+      // The monitoring runner retries 408, 429 and 5xx and gives up immediately
+      // on everything else, so a refused upstream credential needs a status
+      // outside that set to fail fast. It cannot reuse the 401 above: that one
+      // means the runner's own monitoring token was rejected, which is a
+      // different fault from an upstream refusing the credential we presented.
+      const upstream = error instanceof ProbeUpstreamError ? error.status : null;
+      if (upstream === 401 || upstream === 403) {
+        return Response.json(
+          { error: "probe_credential_rejected" },
+          { status: 424, headers: jsonHeaders },
+        );
+      }
       return Response.json(
         { error: "probe_unavailable" },
         { status: 502, headers: jsonHeaders },

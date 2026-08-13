@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { createObservationProbeHandler } from "./handler";
+import {
+  createObservationProbeHandler,
+  ProbeUpstreamError,
+} from "./handler";
 
 async function hash(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -62,5 +65,71 @@ describe("Weekly Plan observation probes", () => {
     );
 
     expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: "probe_unavailable",
+    });
+  });
+
+  it.each([401, 403])(
+    "reports an upstream %i as a refused credential, not unreachability",
+    async (upstreamStatus) => {
+      const probeHandler = createObservationProbeHandler({
+        expectedTokenHash: await hash("monitor-token"),
+        loadDatabaseSnapshot: vi.fn().mockRejectedValue(
+          new ProbeUpstreamError("RPC snapshot failed", upstreamStatus),
+        ),
+        loadFunctionFailures: vi.fn(),
+        loadReleaseIdentity: vi.fn(),
+      });
+
+      const response = await probeHandler(
+        new Request("https://example.test/observe?probe=database", {
+          headers: { authorization: "Bearer monitor-token" },
+        }),
+      );
+
+      expect(response.status).toBe(424);
+      await expect(response.json()).resolves.toEqual({
+        error: "probe_credential_rejected",
+      });
+    },
+  );
+
+  it("keeps an upstream server error unreachable rather than refused", async () => {
+    const probeHandler = createObservationProbeHandler({
+      expectedTokenHash: await hash("monitor-token"),
+      loadDatabaseSnapshot: vi.fn().mockRejectedValue(
+        new ProbeUpstreamError("RPC snapshot failed", 503),
+      ),
+      loadFunctionFailures: vi.fn(),
+      loadReleaseIdentity: vi.fn(),
+    });
+
+    const response = await probeHandler(
+      new Request("https://example.test/observe?probe=database", {
+        headers: { authorization: "Bearer monitor-token" },
+      }),
+    );
+
+    expect(response.status).toBe(502);
+  });
+
+  it("keeps the upstream message out of the refused-credential body", async () => {
+    const probeHandler = createObservationProbeHandler({
+      expectedTokenHash: await hash("monitor-token"),
+      loadDatabaseSnapshot: vi.fn(),
+      loadFunctionFailures: vi.fn().mockRejectedValue(
+        new ProbeUpstreamError("PGRST303 JWT expired for sb_secret_t_HfM", 401),
+      ),
+      loadReleaseIdentity: vi.fn(),
+    });
+
+    const response = await probeHandler(
+      new Request("https://example.test/observe?probe=function-failures", {
+        headers: { authorization: "Bearer monitor-token" },
+      }),
+    );
+
+    expect(JSON.stringify(await response.json())).not.toContain("PGRST303");
   });
 });

@@ -1,5 +1,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createObservationProbeHandler } from "./handler.ts";
+import {
+  createObservationProbeHandler,
+  ProbeUpstreamError,
+} from "./handler.ts";
 
 const EXPECTED_MONITOR_TOKEN_HASH =
   "9211a1250a23b36181c4bc82cbe7f2acd76dc779c3606c34776185e6dd6dfb30";
@@ -29,7 +32,9 @@ async function rpc(name: string): Promise<Record<string, unknown>> {
     },
     body: "{}",
   });
-  if (!response.ok) throw new Error(`RPC ${name} failed`);
+  if (!response.ok) {
+    throw new ProbeUpstreamError(`RPC ${name} failed`, response.status);
+  }
   return await response.json() as Record<string, unknown>;
 }
 
@@ -44,7 +49,12 @@ const handler = createObservationProbeHandler({
       `${supabaseUrl}/functions/v1/generate-meal-plan/release-identity`,
       { headers: { authorization } },
     );
-    if (!response.ok) throw new Error("Release identity probe failed");
+    if (!response.ok) {
+      throw new ProbeUpstreamError(
+        "Release identity probe failed",
+        response.status,
+      );
+    }
     return await response.json() as Record<string, unknown>;
   },
 });

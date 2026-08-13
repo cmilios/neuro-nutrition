@@ -79,6 +79,22 @@ mistyped credential — fails immediately without retrying, so a genuine
 misconfiguration still fails closed and fast. Exhausting all attempts remains a
 `monitoring_unavailable` critical finding that fails the run.
 
+The observation function distinguishes the two upstream failure modes it can
+meet, so that classification is reachable. When an upstream refuses the
+credential the probe presented it, the function returns `424
+probe_credential_rejected`, which the runner does not retry; an upstream that
+could not be reached, or failed for any other reason, keeps `502
+probe_unavailable` and is retried. Which credential was refused depends on the
+probe: the database and function-failure probes present the service credential
+held inside the function, so a `424` there means the Data API rejected it, while
+the release-identity probe forwards the runner's own monitoring credential to
+`generate-meal-plan`, so a `424` there means the two functions' expected digests
+have drifted apart — typically a half-finished rotation. That is distinct again
+from this function's own `401 unauthorized`, which means it rejected the
+runner's credential itself. No upstream status text or message crosses the
+boundary: the runner receives the error class only, per
+[`docs/privacy-and-security.md`](../docs/privacy-and-security.md).
+
 To rotate the monitoring credential, generate a new random 256-bit value, write
 it to all three `OBSERVATION_*_TOKEN` GitHub secrets, replace its digest in both
 Edge Functions, and deploy both functions together. A deliberate

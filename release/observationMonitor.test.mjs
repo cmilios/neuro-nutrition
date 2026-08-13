@@ -107,13 +107,19 @@ describe("observation monitor", () => {
     expect(databaseAttempts).toBe(3);
   });
 
-  it("stops retrying a probe that is rejecting our credentials", async () => {
+  // 424 is what the observation function answers when the Data API refused the
+  // service credential it holds. It has to stay outside the retryable set, or
+  // that refusal is hidden behind four attempts and reported as a blip.
+  it.each([
+    ["the runner's own credential is rejected", 401],
+    ["a probe's upstream refuses the credential it presented", 424],
+  ])("stops retrying when %s", async (_case, refusalStatus) => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     let databaseAttempts = 0;
     const fetchMock = vi.fn((url) => {
       if (url.endsWith("/database")) {
         databaseAttempts += 1;
-        return Promise.resolve(new Response(null, { status: 401 }));
+        return Promise.resolve(new Response(null, { status: refusalStatus }));
       }
       if (url.endsWith("/release")) {
         return Promise.resolve(new Response(JSON.stringify({ matches: true })));
@@ -130,7 +136,7 @@ describe("observation monitor", () => {
     });
 
     expect(result.evaluation.status).toBe("failed");
-    expect(result.snapshot.error).toBe("http_401");
+    expect(result.snapshot.error).toBe(`http_${refusalStatus}`);
     expect(databaseAttempts).toBe(1);
   });
 });
