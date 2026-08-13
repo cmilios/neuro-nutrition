@@ -65,14 +65,25 @@ export function evaluateObservationSnapshot(snapshot) {
 const validLink = (value) =>
   typeof value === "string" && /^https?:\/\/\S+$/.test(value);
 
-const hasFifteenMinuteCoverage = (evaluations, start, end) => {
+/**
+ * The observation workflow asks GitHub for a run every fifteen minutes, but
+ * GitHub treats scheduled workflows as best-effort and throttles them: observed
+ * gaps run 45-90 minutes, and past 2h20m overnight. A fifteen-minute ceiling
+ * therefore blocked every window on the timestamps alone, so `blocked` could
+ * not distinguish an unhealthy system from a late scheduler. Three hours clears
+ * the worst gap seen while still catching a monitor that genuinely stopped.
+ */
+export const MAXIMUM_OBSERVATION_GAP_MINUTES = 180;
+
+const hasBoundedGapCoverage = (evaluations, start, end) => {
   const times = evaluations
     .map((evaluation) => Date.parse(evaluation.checkedAt))
     .filter(Number.isFinite)
     .sort((left, right) => left - right);
   if (times.length < 2 || times[0] > start || times.at(-1) < end) return false;
-  const cadence = 15 * 60 * 1000;
-  return times.slice(1).every((time, index) => time - times[index] <= cadence);
+  const maximumGap = MAXIMUM_OBSERVATION_GAP_MINUTES * 60 * 1000;
+  return times.slice(1)
+    .every((time, index) => time - times[index] <= maximumGap);
 };
 
 export function createDeliveryGateReport(input) {
@@ -98,7 +109,7 @@ export function createDeliveryGateReport(input) {
     {
       gate: "monitoring",
       status: validLink(input.monitoringCoverage?.evidence)
-        && hasFifteenMinuteCoverage(evaluations, start, end)
+        && hasBoundedGapCoverage(evaluations, start, end)
         && evaluations.length > 0
         && evaluations.every((result) => result.status === "passed")
         ? "passed" : "failed",

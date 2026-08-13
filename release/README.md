@@ -21,10 +21,14 @@ Issue #25 adds a separate, read-only delivery gate. Migration
 snapshot function. Provision the workflow token with that role; never use the
 service-role key for observation.
 
-The scheduled workflow runs every fifteen minutes. Its three GET-only probes
-return the aggregate database snapshot, immutable release comparison, and
-critical function-failure count. Missing or failed probes fail closed, emit a
-GitHub Actions operator alert, and optionally notify `OBSERVATION_ALERT_URL`.
+The scheduled workflow asks GitHub for a run every fifteen minutes. GitHub
+treats scheduled workflows as best-effort and throttles them, so the intervals
+it actually delivers are longer and uneven; the delivery gate tolerates gaps of
+up to three hours rather than requiring the requested cadence. Its three
+GET-only probes return the aggregate database snapshot, immutable release
+comparison, and critical function-failure count. Missing or failed probes fail
+closed, emit a GitHub Actions operator alert, and optionally notify
+`OBSERVATION_ALERT_URL`.
 The runner has no plan-mutation path. Client telemetry is allow-listed,
 content-free, best-effort, and cannot interrupt application behavior. Configure
 the required `VITE_CLIENT_INCIDENT_ALERT_URL` deployment secret to route a
@@ -85,8 +89,8 @@ unreviewed redeployment then fails the release-identity check closed.
 After at least 24 hours, assemble every timestamped monitor artifact into the
 input and create the immutable final report with `npm.cmd run
 observation:report`. It derives cadence from those timestamps and says
-`delivered` only when every observation is clean, no gap exceeds fifteen
-minutes, alert reachability is evidenced, the identified recovery point has
+`delivered` only when every observation is clean, no gap exceeds three hours,
+alert reachability is evidenced, the identified recovery point has
 direct retention proof through at least seven days after the window, all
 required evidence links are present, and every finding has a resolved
 disposition. A summary comment or declared timestamp cannot satisfy these

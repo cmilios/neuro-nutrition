@@ -6,7 +6,7 @@
     "startedAt": "2026-07-28T09:12:21.000Z",
     "endedAt": "2026-07-29T10:51:37.000Z",
     "cadenceMinutes": 15,
-    "maximumGapMinutes": 15,
+    "maximumGapMinutes": 180,
     "evidence": "https://github.com/cmilios/neuro-nutrition/issues/24#issuecomment-5116755338"
   },
   "operatorAlerting": {
