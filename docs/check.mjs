@@ -1,5 +1,6 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { inflateSync } from "node:zlib";
 
 const root = process.cwd();
 const ignoredDirectories = new Set([".git", "dist", "node_modules"]);
@@ -180,6 +181,147 @@ const readRequiredFile = async (file, contract, message) => {
   }
 };
 
+const crc32 = (contents, start, end) => {
+  let crc = 0xffffffff;
+  for (let index = start; index < end; index += 1) {
+    crc ^= contents[index];
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const NON_INTERLACED_PASSES = [
+  { startX: 0, startY: 0, stepX: 1, stepY: 1 },
+];
+const ADAM7_PASSES = [
+  { startX: 0, startY: 0, stepX: 8, stepY: 8 },
+  { startX: 4, startY: 0, stepX: 8, stepY: 8 },
+  { startX: 0, startY: 4, stepX: 4, stepY: 8 },
+  { startX: 2, startY: 0, stepX: 4, stepY: 4 },
+  { startX: 0, startY: 2, stepX: 2, stepY: 4 },
+  { startX: 1, startY: 0, stepX: 2, stepY: 2 },
+  { startX: 0, startY: 1, stepX: 1, stepY: 2 },
+];
+
+const hasValidPngStructure = (contents) => {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (contents.length < 33 || !contents.subarray(0, 8).equals(signature)) {
+    return false;
+  }
+
+  let offset = 8;
+  let sawHeader = false;
+  let sawImageData = false;
+  let sawEnd = false;
+  let width = 0;
+  let height = 0;
+  let bitsPerPixel = 0;
+  let interlaceMethod = -1;
+  const imageDataChunks = [];
+  while (offset + 12 <= contents.length) {
+    const chunkLength = contents.readUInt32BE(offset);
+    const chunkType = contents.toString("ascii", offset + 4, offset + 8);
+    const nextOffset = offset + 12 + chunkLength;
+    if (nextOffset > contents.length) return false;
+    const storedCrc = contents.readUInt32BE(nextOffset - 4);
+    const computedCrc = crc32(contents, offset + 4, nextOffset - 4);
+    if (storedCrc !== computedCrc) return false;
+
+    if (!sawHeader) {
+      if (chunkType !== "IHDR" || chunkLength !== 13) return false;
+      width = contents.readUInt32BE(offset + 8);
+      height = contents.readUInt32BE(offset + 12);
+      if (width === 0 || height === 0) return false;
+      const bitDepth = contents[offset + 16];
+      const colorType = contents[offset + 17];
+      const compressionMethod = contents[offset + 18];
+      const filterMethod = contents[offset + 19];
+      interlaceMethod = contents[offset + 20];
+      const allowedBitDepths = new Map([
+        [0, new Set([1, 2, 4, 8, 16])],
+        [2, new Set([8, 16])],
+        [3, new Set([1, 2, 4, 8])],
+        [4, new Set([8, 16])],
+        [6, new Set([8, 16])],
+      ]);
+      const samplesPerPixel = new Map([
+        [0, 1],
+        [2, 3],
+        [3, 1],
+        [4, 2],
+        [6, 4],
+      ]);
+      if (
+        !allowedBitDepths.get(colorType)?.has(bitDepth)
+        || compressionMethod !== 0
+        || filterMethod !== 0
+        || ![0, 1].includes(interlaceMethod)
+      ) {
+        return false;
+      }
+      bitsPerPixel = bitDepth * samplesPerPixel.get(colorType);
+      sawHeader = true;
+    } else if (chunkType === "IHDR") {
+      return false;
+    }
+
+    if (chunkType === "IDAT") {
+      sawImageData = true;
+      imageDataChunks.push(contents.subarray(offset + 8, nextOffset - 4));
+    }
+    if (chunkType === "IEND") {
+      if (chunkLength !== 0 || nextOffset !== contents.length) return false;
+      sawEnd = true;
+    }
+    offset = nextOffset;
+  }
+
+  if (!sawHeader || !sawImageData || !sawEnd) return false;
+
+  const passes = interlaceMethod === 0
+    ? NON_INTERLACED_PASSES
+    : ADAM7_PASSES;
+  const scanlines = [];
+  let expectedLength = 0;
+  const maximumDecodedBytes = 50 * 1024 * 1024;
+  for (const { startX, startY, stepX, stepY } of passes) {
+    const passWidth = width <= startX ? 0 : Math.ceil((width - startX) / stepX);
+    const passHeight = height <= startY ? 0 : Math.ceil((height - startY) / stepY);
+    if (passWidth === 0 || passHeight === 0) continue;
+    const rowLength = 1 + Math.ceil((passWidth * bitsPerPixel) / 8);
+    const passLength = rowLength * passHeight;
+    if (
+      !Number.isSafeInteger(passLength)
+      || expectedLength + passLength > maximumDecodedBytes
+    ) {
+      return false;
+    }
+    scanlines.push({ rowLength, height: passHeight });
+    expectedLength += passLength;
+  }
+
+  let decoded;
+  try {
+    decoded = inflateSync(Buffer.concat(imageDataChunks), {
+      maxOutputLength: expectedLength,
+    });
+  } catch {
+    return false;
+  }
+  if (decoded.length !== expectedLength) return false;
+
+  let rowOffset = 0;
+  for (const pass of scanlines) {
+    for (let row = 0; row < pass.height; row += 1) {
+      if (decoded[rowOffset] > 4) return false;
+      rowOffset += pass.rowLength;
+    }
+  }
+  return rowOffset === decoded.length;
+};
+
 const validatePublicIssueTemplates = async () => {
   const templates = [
     ["bug_report.yml", "Structured bug report template is missing"],
@@ -267,11 +409,25 @@ const validateWikiBundle = async () => {
   }
 
   const asset = path.join(wikiRoot, representativeWikiAsset);
-  await readRequiredFile(
-    asset,
-    "wiki-bundle",
-    `Required Wiki asset is missing: ${representativeWikiAsset}`,
-  );
+  let assetContents = null;
+  try {
+    assetContents = await readFile(asset);
+  } catch {
+    reportFailure(
+      asset,
+      1,
+      "wiki-bundle",
+      `Required Wiki asset is missing: ${representativeWikiAsset}`,
+    );
+  }
+  if (assetContents !== null && !hasValidPngStructure(assetContents)) {
+    reportFailure(
+      asset,
+      1,
+      "wiki-image-file",
+      `Required Wiki asset must be a valid PNG: ${representativeWikiAsset}`,
+    );
+  }
 
   const navigationContract = [
     ["Home.md", [
