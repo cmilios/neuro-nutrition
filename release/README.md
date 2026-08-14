@@ -73,11 +73,21 @@ The three configured probe URLs are:
 Each probe is attempted up to four times with a ten-second per-request timeout
 and a linear backoff, so a single transient upstream error (a 502 from the
 Supabase edge, a dropped connection) does not report the monitor as unavailable.
-Retries cover network failures and the retryable statuses 408, 429, 500, 502,
-503 and 504. Any other non-2xx response — notably 401 or 403 from a rotated or
-mistyped credential — fails immediately without retrying, so a genuine
-misconfiguration still fails closed and fast. Exhausting all attempts remains a
+Retries cover network failures and the retryable statuses 408, 424, 429, 500,
+502, 503 and 504. A `401` or `403` — our own monitoring credential rotated or
+mistyped — fails immediately without retrying, so a genuine misconfiguration
+still fails closed and fast. Exhausting all attempts remains a
 `monitoring_unavailable` critical finding that fails the run.
+
+`424` is retried despite being a 4xx, because the refusal it reports is
+observed to be transient: gateway logs show the Data API answering `PGRST303`
+on one call and `200` on the next with the same key, several times a day. Those
+refusals were invisible until the function learned to report them separately —
+the retry had always absorbed them. Treating one as fatal would fail a window
+that is about to heal itself, so a refusal is only believed once it has
+survived every attempt, and it is then still reported as `http_424` rather than
+collapsing into an unreachable upstream. The cause of the intermittent refusal
+is tracked separately and is not yet explained.
 
 The observation function distinguishes the two upstream failure modes it can
 meet, so that classification is reachable. When an upstream refuses the

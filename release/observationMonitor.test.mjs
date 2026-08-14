@@ -107,19 +107,13 @@ describe("observation monitor", () => {
     expect(databaseAttempts).toBe(3);
   });
 
-  // 424 is what the observation function answers when the Data API refused the
-  // service credential it holds. It has to stay outside the retryable set, or
-  // that refusal is hidden behind four attempts and reported as a blip.
-  it.each([
-    ["the runner's own credential is rejected", 401],
-    ["a probe's upstream refuses the credential it presented", 424],
-  ])("stops retrying when %s", async (_case, refusalStatus) => {
+  it("stops retrying a probe that is rejecting our credentials", async () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     let databaseAttempts = 0;
     const fetchMock = vi.fn((url) => {
       if (url.endsWith("/database")) {
         databaseAttempts += 1;
-        return Promise.resolve(new Response(null, { status: refusalStatus }));
+        return Promise.resolve(new Response(null, { status: 401 }));
       }
       if (url.endsWith("/release")) {
         return Promise.resolve(new Response(JSON.stringify({ matches: true })));
@@ -136,7 +130,66 @@ describe("observation monitor", () => {
     });
 
     expect(result.evaluation.status).toBe("failed");
-    expect(result.snapshot.error).toBe(`http_${refusalStatus}`);
+    expect(result.snapshot.error).toBe("http_401");
     expect(databaseAttempts).toBe(1);
+  });
+
+  // Observed in production: the Data API refuses the observation function's key
+  // on one call and accepts it on the next. Failing the window on the first
+  // refusal reports a self-healing blip as a monitoring outage.
+  it("retries an upstream credential refusal that clears", async () => {
+    let databaseAttempts = 0;
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith("/database")) {
+        databaseAttempts += 1;
+        if (databaseAttempts < 2) {
+          return Promise.resolve(new Response(null, { status: 424 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(databaseSnapshot)));
+      }
+      if (url.endsWith("/release")) {
+        return Promise.resolve(new Response(JSON.stringify({ matches: true })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runObservationMonitor({
+      databaseUrl: "https://example.test/database",
+      releaseIdentityUrl: "https://example.test/release",
+      functionFailuresUrl: "https://example.test/functions",
+      retryDelayMs: 0,
+    });
+
+    expect(result.evaluation.status).toBe("passed");
+    expect(databaseAttempts).toBe(2);
+  });
+
+  it("still reports a refusal that survives every attempt distinctly", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let databaseAttempts = 0;
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith("/database")) {
+        databaseAttempts += 1;
+        return Promise.resolve(new Response(null, { status: 424 }));
+      }
+      if (url.endsWith("/release")) {
+        return Promise.resolve(new Response(JSON.stringify({ matches: true })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runObservationMonitor({
+      databaseUrl: "https://example.test/database",
+      releaseIdentityUrl: "https://example.test/release",
+      functionFailuresUrl: "https://example.test/functions",
+      attempts: 3,
+      retryDelayMs: 0,
+    });
+
+    expect(result.evaluation.status).toBe("failed");
+    expect(result.snapshot.error).toBe("http_424");
+    expect(databaseAttempts).toBe(3);
   });
 });

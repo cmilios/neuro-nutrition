@@ -3,7 +3,14 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { evaluateObservationSnapshot } from "./observationGate.mjs";
 
-const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+// 424 is the observation function reporting that an upstream refused the
+// credential it presented. Gateway logs show those refusals are transient — a
+// PGRST303 on one call, a 200 on the next, same key — so they are retried like
+// any other blip. If one survives every attempt it is still reported as
+// http_424, which stays distinguishable from an unreachable upstream. A 401,
+// by contrast, means our own monitoring token was rejected: that is a real
+// misconfiguration and must not be retried.
+const RETRYABLE_STATUSES = new Set([408, 424, 429, 500, 502, 503, 504]);
 const PROBE_TIMEOUT_MS = 10_000;
 // The observation probes 502 often enough that a single retry still leaves the
 // scheduled run red most days; four attempts on a second-scale backoff also
