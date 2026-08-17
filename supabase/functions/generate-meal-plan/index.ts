@@ -668,7 +668,7 @@ async function deployedSourceFiles(): Promise<
 const releaseIdentityHandler = createReleaseIdentityHandler({
   expectedTokenHash:
     "9211a1250a23b36181c4bc82cbe7f2acd76dc779c3606c34776185e6dd6dfb30",
-  expectedVersion: 17,
+  expectedVersion: 18,
   deploymentId: () => Deno.env.get("DENO_DEPLOYMENT_ID"),
   readSourceFiles: deployedSourceFiles,
 });
