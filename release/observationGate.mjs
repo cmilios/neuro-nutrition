@@ -1,7 +1,11 @@
 const CHECK_DEFINITIONS = {
   "release-identity": {
+    // The version comparison catches an unreviewed redeploy; the source digest
+    // catches a deployment built from source that was never reviewed, which the
+    // version alone cannot see. `sourceMatches` is null when the deployment
+    // cannot report a digest, which fails no gate but proves nothing either.
     field: "releaseIdentity",
-    passes: (value) => value?.matches === true,
+    passes: (value) => value?.matches === true && value?.sourceMatches !== false,
   },
   "plan-invariants": {
     field: "planInvariants",

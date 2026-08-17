@@ -646,11 +646,31 @@ const applicationHandler = createGenerateMealPlanHandler({
   }),
 });
 
+// Reads the source this deployment is running, so the runner can compare it
+// against the reviewed source. Enumerating the directory rather than naming
+// files means an added or removed module changes the digest too.
+async function deployedSourceFiles(): Promise<
+  Array<{ name: string; content: string }>
+> {
+  const directory = new URL(".", import.meta.url);
+  const files: Array<{ name: string; content: string }> = [];
+  for await (const entry of Deno.readDir(directory)) {
+    if (!entry.isFile || !entry.name.endsWith(".ts")) continue;
+    if (entry.name.endsWith(".test.ts")) continue;
+    files.push({
+      name: entry.name,
+      content: await Deno.readTextFile(new URL(entry.name, directory)),
+    });
+  }
+  return files;
+}
+
 const releaseIdentityHandler = createReleaseIdentityHandler({
   expectedTokenHash:
     "9211a1250a23b36181c4bc82cbe7f2acd76dc779c3606c34776185e6dd6dfb30",
   expectedVersion: 17,
   deploymentId: () => Deno.env.get("DENO_DEPLOYMENT_ID"),
+  readSourceFiles: deployedSourceFiles,
 });
 
 Deno.serve((request) => {

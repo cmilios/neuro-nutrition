@@ -105,6 +105,28 @@ runner's credential itself. No upstream status text or message crosses the
 boundary: the runner receives the error class only, per
 [`docs/privacy-and-security.md`](../docs/privacy-and-security.md).
 
+The release-identity probe reports two independent things. `matches` compares
+the immutable deployment version against the constant reviewed into
+`generate-meal-plan`'s `index.ts`, which catches an unreviewed redeployment.
+That constant travels inside the bundle it describes, so it cannot detect a
+deployment built from source that was never reviewed: the drifted deployment
+carries its own matching constant. `sourceDigest` closes that gap. The function
+reads the source it is actually running and reports a digest of it; the runner
+computes the same digest from the reviewed source in the checkout and compares.
+The comparison therefore happens outside the artifact being checked, which is
+the only place it means anything.
+
+`sourceMatches` is three-valued. `false` is drift and fails the gate. `true` is
+agreement. `null` means the question could not be asked — a deployment predating
+the digest, or a runtime that cannot read its own source — and passes no
+judgement either way, so an older deployment does not fail the gate merely for
+being older. A `null` is not agreement, and a window carrying one has not had
+its source verified.
+
+Digests normalise line endings and trailing whitespace, so a checkout or upload
+that rewrites them does not read as a code change. Anything else — content,
+an added or removed module, a rename — changes the digest.
+
 To rotate the monitoring credential, generate a new random 256-bit value, write
 it to all three `OBSERVATION_*_TOKEN` GitHub secrets, replace its digest in both
 Edge Functions, and deploy both functions together. A deliberate

@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { evaluateObservationSnapshot } from "./observationGate.mjs";
+import { computeSourceDigest, readFunctionSource } from "./sourceDigest.mjs";
 
 // 424 is the observation function reporting that an upstream refused the
 // credential it presented. Gateway logs show those refusals are transient — a
@@ -44,6 +45,37 @@ async function readProbe(url, token, retry = {}) {
   return failure;
 }
 
+/**
+ * Compares the digest the deployment reports against the reviewed source.
+ *
+ * `sourceMatches` is deliberately three-valued. `null` means the question could
+ * not be asked — a deployment predating the digest, a runtime that cannot read
+ * its own source, or no reviewed source to compare against — and must not be
+ * read as agreement. Only `false` is drift.
+ */
+async function withSourceDrift(releaseIdentity, sourceDirectory) {
+  if (!releaseIdentity || typeof releaseIdentity !== "object") {
+    return releaseIdentity;
+  }
+  if ("error" in releaseIdentity) return releaseIdentity;
+  const reported = releaseIdentity.sourceDigest;
+  if (typeof reported !== "string" || !sourceDirectory) {
+    return { ...releaseIdentity, sourceMatches: null };
+  }
+  try {
+    const expected = await computeSourceDigest(
+      await readFunctionSource(sourceDirectory),
+    );
+    return {
+      ...releaseIdentity,
+      expectedSourceDigest: expected,
+      sourceMatches: expected === reported,
+    };
+  } catch {
+    return { ...releaseIdentity, sourceMatches: null };
+  }
+}
+
 export async function runObservationMonitor(options = {}) {
   const retry = {
     attempts: options.attempts,
@@ -57,7 +89,10 @@ export async function runObservationMonitor(options = {}) {
   const snapshot = {
     ...(database && typeof database === "object" ? database : {}),
     checkedAt: new Date().toISOString(),
-    releaseIdentity,
+    releaseIdentity: await withSourceDrift(
+      releaseIdentity,
+      options.releaseIdentitySourceDirectory,
+    ),
     functionFailures,
   };
   const evaluation = evaluateObservationSnapshot(snapshot);
@@ -96,6 +131,10 @@ if (invokedPath && import.meta.url === pathToFileURL(invokedPath).href) {
     releaseIdentityToken: process.env.OBSERVATION_RELEASE_IDENTITY_TOKEN,
     functionFailuresUrl: process.env.OBSERVATION_FUNCTION_FAILURES_URL,
     functionFailuresToken: process.env.OBSERVATION_FUNCTION_FAILURES_TOKEN,
+    releaseIdentitySourceDirectory: new URL(
+      "../supabase/functions/generate-meal-plan",
+      import.meta.url,
+    ),
     alertUrl: process.env.OBSERVATION_ALERT_URL,
     output: process.env.OBSERVATION_OUTPUT ?? "observation-result.json",
   });

@@ -97,6 +97,32 @@ describe("observation gate", () => {
     expect(result.status).toBe("passed");
   });
 
+  it.each([
+    ["drift is detected", false, "failed"],
+    ["the source matches", true, "passed"],
+    ["the deployment cannot report a digest", null, "passed"],
+  ])("%s: release identity is %s", (_case, sourceMatches, status) => {
+    const snapshot = structuredClone(cleanSnapshot);
+    snapshot.releaseIdentity = { matches: true, sourceMatches };
+
+    const result = evaluateObservationSnapshot(snapshot);
+
+    expect(result.checks["release-identity"].status).toBe(status);
+  });
+
+  it("fails a matching version whose source has drifted", () => {
+    const snapshot = structuredClone(cleanSnapshot);
+    snapshot.releaseIdentity = { matches: true, sourceMatches: false };
+
+    const result = evaluateObservationSnapshot(snapshot);
+
+    expect(result.status).toBe("failed");
+    expect(result.criticalFindings).toContainEqual({
+      check: "release-identity",
+      code: "critical_finding",
+    });
+  });
+
   it("fails closed when a probe is unavailable", () => {
     const snapshot = structuredClone(cleanSnapshot);
     snapshot.functionFailures = { error: "unavailable" };

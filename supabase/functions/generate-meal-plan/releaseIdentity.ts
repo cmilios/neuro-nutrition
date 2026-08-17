@@ -33,10 +33,44 @@ function deploymentVersion(deploymentId: string | undefined): number | null {
   return match ? Number(match[1]) : null;
 }
 
+export type SourceFile = { name: string; content: string };
+
+/**
+ * Digest of the source this deployment is actually running.
+ *
+ * The version comparison below cannot detect source drift: `expectedVersion`
+ * travels inside the same bundle it describes, so a deployment built from
+ * unreviewed source carries a constant that still matches. This digest is
+ * computed from the running files instead, and is compared against the
+ * reviewed source by the monitoring runner — outside the artifact, which is
+ * the only place the comparison means anything.
+ *
+ * Line endings and trailing whitespace are normalised so a checkout or upload
+ * that rewrites them does not read as a code change.
+ */
+export async function computeSourceDigest(
+  files: readonly SourceFile[],
+): Promise<string> {
+  const payload = [...files]
+    .sort((left, right) => (left.name < right.name ? -1 : 1))
+    .map((file) =>
+      `${file.name}\n${file.content.replace(/\r\n/g, "\n").trimEnd()}\n`
+    )
+    .join("");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(payload),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function createReleaseIdentityHandler(options: {
   expectedTokenHash: string;
   expectedVersion: number;
   deploymentId: () => string | undefined;
+  readSourceFiles: () => Promise<readonly SourceFile[]>;
 }) {
   return async (request: Request): Promise<Response> => {
     if (request.method !== "GET") {
@@ -61,11 +95,20 @@ export function createReleaseIdentityHandler(options: {
     }
 
     const actualVersion = deploymentVersion(options.deploymentId());
+    // A runtime that cannot read its own source reports null rather than
+    // guessing, so the runner can tell "no drift" from "cannot tell".
+    let sourceDigest: string | null = null;
+    try {
+      sourceDigest = await computeSourceDigest(await options.readSourceFiles());
+    } catch {
+      sourceDigest = null;
+    }
     return Response.json(
       {
         matches: actualVersion === options.expectedVersion,
         expectedVersion: options.expectedVersion,
         actualVersion,
+        sourceDigest,
       },
       { headers: jsonHeaders },
     );

@@ -1,5 +1,7 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runObservationMonitor } from "./observationMonitor.mjs";
+import { computeSourceDigest, readFunctionSource } from "./sourceDigest.mjs";
 
 const databaseSnapshot = {
   rolloutState: "authoritative",
@@ -105,6 +107,86 @@ describe("observation monitor", () => {
 
     expect(result.evaluation.status).toBe("passed");
     expect(databaseAttempts).toBe(3);
+  });
+
+  describe("release-identity source drift", () => {
+    const probeReturning = (releaseIdentity) =>
+      vi.fn((url) => {
+        if (url.endsWith("/release")) {
+          return Promise.resolve(
+            new Response(JSON.stringify(releaseIdentity)),
+          );
+        }
+        if (url.endsWith("/database")) {
+          return Promise.resolve(new Response(JSON.stringify(databaseSnapshot)));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ critical: 0 })));
+      });
+
+    const run = async (releaseIdentity, sourceDirectory) => {
+      vi.stubGlobal("fetch", probeReturning(releaseIdentity));
+      return await runObservationMonitor({
+        databaseUrl: "https://example.test/database",
+        releaseIdentityUrl: "https://example.test/release",
+        functionFailuresUrl: "https://example.test/functions",
+        releaseIdentitySourceDirectory: sourceDirectory,
+        retryDelayMs: 0,
+      });
+    };
+
+    const reviewedSource = new URL(
+      "../supabase/functions/generate-meal-plan",
+      import.meta.url,
+    );
+
+    it("passes when the deployment reports the reviewed source", async () => {
+      const expected = await computeSourceDigest(
+        await readFunctionSource(reviewedSource),
+      );
+
+      const result = await run(
+        { matches: true, sourceDigest: expected },
+        reviewedSource,
+      );
+
+      expect(result.snapshot.releaseIdentity.sourceMatches).toBe(true);
+      expect(result.evaluation.status).toBe("passed");
+    });
+
+    it("fails a deployment whose source differs from the reviewed source", async () => {
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+      const result = await run(
+        { matches: true, sourceDigest: "0".repeat(64) },
+        reviewedSource,
+      );
+
+      expect(result.snapshot.releaseIdentity.sourceMatches).toBe(false);
+      expect(result.evaluation.status).toBe("failed");
+    });
+
+    it.each([
+      ["the deployment reports no digest", { matches: true }],
+      ["the deployment could not read its source", {
+        matches: true,
+        sourceDigest: null,
+      }],
+    ])("cannot tell when %s", async (_case, releaseIdentity) => {
+      const result = await run(releaseIdentity, reviewedSource);
+
+      expect(result.snapshot.releaseIdentity.sourceMatches).toBeNull();
+      expect(result.evaluation.status).toBe("passed");
+    });
+
+    it("leaves an unavailable probe untouched", async () => {
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+      const result = await run({ error: "probe_not_configured" }, undefined);
+
+      expect(result.snapshot.releaseIdentity).toEqual({
+        error: "probe_not_configured",
+      });
+    });
   });
 
   it("stops retrying a probe that is rejecting our credentials", async () => {
